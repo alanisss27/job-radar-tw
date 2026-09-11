@@ -1,4 +1,75 @@
 profiles:
+  - name: clinical-discovery
+    version: "1.0"
+    # Assign only to relevant healthcare/life-science employers.
+    # Scores indicate discovery evidence, not candidate fit.
+    threshold: 0.70
+    strong_threshold: 0.90
+    allow_other_job_family: true
+    weights: {title: 0.70, domain: 0.30}
+    title_terms:
+      - clinical project manager
+      - associate project manager
+      - clinical project coordinator
+      - clinical operations project coordinator
+      - clinical operations project manager
+      - clinical program coordinator
+      - clinical trial project coordinator
+      - clinical operations associate
+      - clinical operations specialist
+      - clinical trial associate
+      - clinical operations project specialist
+      - gxp project coordinator
+      - gxp project manager
+      - gmp project coordinator
+      - gmp project manager
+      - gmp/gxp project coordinator
+      - gmp/gxp project manager
+      - validation project coordinator
+      - validation project manager
+      - scientific project manager
+      - scientific program coordinator
+      - gmp operations manager
+      - gxp operations manager
+      - gmp/gxp operations manager
+      - quality operations project manager
+      - technical operations project manager
+    # Description evidence can qualify any title or job family.
+    # Operational Excellence titles require this evidence.
+    responsibility_terms:
+      - project management
+      - project coordination
+      - program coordination
+      - manage projects
+      - managing projects
+      - coordinate projects
+      - coordinating projects
+      - lead projects
+      - leading projects
+      - project timelines
+      - project milestones
+      - project deliverables
+      - cross-functional projects
+      - cross functional projects
+      - validation projects
+      - study start-up
+      - study startup
+      - study closeout
+      - technology transfer
+      - tech transfer
+    domain_terms:
+      - clinical
+      - life sciences
+      - pharmaceutical
+      - biotechnology
+      - laboratory
+      - scientific
+      - gmp
+      - gxp
+      - validation
+    skills: []
+    gap_terms: {}
+
   - name: healthcare
     version: "1.0"
     threshold: 0.60

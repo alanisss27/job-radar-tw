@@ -103,6 +103,18 @@ def _contains(text: str, terms: list[str]) -> bool:
     return any(term.lower() in lower for term in terms)
 
 
+def _discovery_hits(text: str, terms: list[str]) -> set[str]:
+    """Match complete phrases without matching inside longer words."""
+    return {
+        term.strip().lower()
+        for term in terms
+        if term.strip()
+        and re.search(
+            r"(?<!\w)" + re.escape(term.strip()) + r"(?!\w)", text, re.IGNORECASE
+        )
+    }
+
+
 def _requires_citizenship(text: str) -> bool:
     if not _contains(text, ["u.s. citizen", "us citizen", "united states citizen", "citizenship"]):
         return False
@@ -328,7 +340,7 @@ def match_job(
             tier="filtered",
             filtered_reason="seniority",
         )
-    if job.job_family == "other":
+    if job.job_family == "other" and not profile.allow_other_job_family:
         return MatchResult(
             profile=profile.name,
             score=0,
@@ -383,7 +395,15 @@ def match_job(
 
     title_text = job.raw.title.lower()
     title_desc = f"{job.raw.title} {job.raw.description_raw}".lower()
-    title_score = 1.0 if any(term.lower() in title_text for term in profile.title_terms) else 0.0
+    title_hit = (
+        bool(_discovery_hits(title_text, profile.title_terms))
+        if profile.allow_other_job_family
+        else _contains(title_text, profile.title_terms)
+    )
+    responsibility_hits = _discovery_hits(
+        job.raw.description_raw, profile.responsibility_terms
+    )
+    title_score = 1.0 if title_hit or responsibility_hits else 0.0
     profile_domain_score = min(
         1.0, sum(term.lower() in title_desc for term in profile.domain_terms) / 3
     )
@@ -430,6 +450,8 @@ def match_job(
     reasons = [f"{key}: {value:.0%}" for key, value in dimensions.items() if value >= 0.5]
     if resume_hits:
         reasons.append("resume: " + ", ".join(sorted(resume_hits)[:5]))
+    if responsibility_hits:
+        reasons.append("responsibilities: " + ", ".join(sorted(responsibility_hits)[:5]))
     gaps = []
     penalty = 0.0
     if candidate:

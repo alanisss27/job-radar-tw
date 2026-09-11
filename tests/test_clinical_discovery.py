@@ -1,0 +1,316 @@
+from datetime import UTC, datetime
+from pathlib import Path
+
+import pytest
+
+from job_monitor import pipeline
+from job_monitor.config import (
+    Settings,
+    load_candidate,
+    load_companies,
+    load_preferences,
+    load_profiles,
+)
+from job_monitor.matching import match_job, parse_job
+from job_monitor.models import RawJob
+from job_monitor.storage import MatchDecision, Storage
+
+
+PROFILES = load_profiles(Path("config/profiles.yml"))
+PROFILE = PROFILES["clinical-discovery"]
+PREFERENCES = load_preferences(Path("config/preferences.yml"))
+COMPANIES = {
+    company.slug: company
+    for company in load_companies(Path("config/companies.yml"))
+}
+
+
+def raw(title, description="", location="Remote"):
+    return RawJob(
+        source_company="komodo-health",
+        external_job_id="clinical-test",
+        title=title,
+        location_raw=location,
+        description_raw=description,
+        url="https://example.com/jobs/clinical-test",
+    )
+
+
+def match(title, description="", location="Remote"):
+    return match_job(
+        parse_job(raw(title, description, location)),
+        PROFILE,
+        PREFERENCES,
+    )
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Associate Clinical Project Manager",
+        "Clinical Project Manager",
+        "Associate Project Manager — Clinical",
+        "Associate Project Manager — Life Sciences",
+        "Clinical Project Coordinator",
+        "Clinical Operations Project Coordinator",
+        "Clinical Operations Project Manager",
+        "Clinical Program Coordinator",
+        "Clinical Trial Project Coordinator",
+        "Clinical Operations Associate",
+        "Clinical Operations Specialist",
+        "Clinical Trial Associate",
+        "Clinical Operations Project Specialist",
+        "GxP Project Coordinator",
+        "GxP Project Manager",
+        "Validation Project Coordinator",
+        "Validation Project Manager",
+        "Scientific Project Manager",
+        "Scientific Program Coordinator",
+        "GMP Operations Manager",
+        "GxP Operations Manager",
+        "GMP/GxP Operations Manager",
+        "GMP Project Manager",
+        "GMP Project Coordinator",
+        "GMP/GxP Project Manager",
+        "GMP/GxP Project Coordinator",
+        "Quality Operations Project Manager",
+        "Technical Operations Project Manager",
+    ],
+)
+def test_requested_titles_qualify_without_description(title):
+    assert match(title).eligible
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Laboratory Technician",
+        "QC Scientist",
+        "QA Specialist",
+        "Clinical Data Specialist",
+        "Research Scientist",
+        "Operations Associate",
+        "Unfamiliar Role",
+    ],
+)
+def test_responsibilities_qualify_without_pm_title(title):
+    parsed = parse_job(raw(title, "Coordinate projects across teams."))
+    result = match_job(parsed, PROFILE, PREFERENCES)
+
+    assert result.eligible
+    assert result.score >= PROFILE.threshold
+    assert "responsibilities: coordinate projects" in result.reasons
+
+
+@pytest.mark.parametrize("term", PROFILE.responsibility_terms)
+def test_each_configured_responsibility_can_supply_role_evidence(term):
+    assert match("Unfamiliar Role", f"Responsibilities include {term}.").eligible
+
+
+def test_operational_excellence_requires_responsibility_evidence():
+    title = "Operational Excellence Project Manager"
+
+    assert not match(title, "Improve routine operational efficiency.").eligible
+    assert match(title, "Own project milestones and project deliverables.").eligible
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Nonclinical Project Manager",
+        "Preclinical Project Manager",
+        "Clinical Trial Associateship",
+        "Clinical Operations Specialistship",
+    ],
+)
+def test_title_phrases_do_not_match_inside_longer_words(title):
+    assert not match(title).eligible
+    assert match(title, "Coordinate projects across teams.").eligible
+
+
+def test_responsibility_phrases_do_not_match_inside_longer_words():
+    assert not match("Unfamiliar Role", "Supercoordinate projects.").eligible
+
+
+def test_matching_is_case_insensitive_and_accepts_title_suffixes():
+    assert match("ASSOCIATE CLINICAL PROJECT MANAGER (CONTRACT)").eligible
+    assert match("Unfamiliar Role", "COORDINATE PROJECTS.").eligible
+
+
+def test_domain_words_alone_do_not_qualify():
+    result = match(
+        "Laboratory Technician",
+        "Clinical pharmaceutical biotechnology laboratory GMP GxP validation.",
+    )
+
+    assert not result.eligible
+    assert result.score == 0.30
+    assert result.filtered_reason is None
+
+
+@pytest.mark.parametrize(
+    "requirement",
+    [
+        "Must be a U.S. citizen.",
+        "An active security clearance is required.",
+    ],
+)
+def test_citizenship_and_clearance_still_override_discovery(requirement):
+    result = match("Clinical Project Manager", requirement)
+
+    assert not result.eligible
+    assert result.filtered_reason == "citizenship_or_clearance"
+
+
+@pytest.mark.parametrize("location", ["Remote Canada", "Boston, MA", "Basel", ""])
+def test_location_remains_broad(location):
+    assert match("Clinical Project Manager", location=location).eligible
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Junior Clinical Project Manager",
+        "Senior Clinical Project Manager",
+        "Director, Clinical Project Manager",
+    ],
+)
+def test_seniority_is_not_a_discovery_exclusion(title):
+    assert match(title).eligible
+
+
+def test_candidate_requirements_do_not_penalize_without_candidate():
+    title = "Clinical Project Manager"
+    result = match(
+        title,
+        "20 years of experience required. PhD required. Manage a team.",
+    )
+
+    assert result.eligible
+    assert result.score == match(title).score
+    assert result.bucket == "target"
+
+
+def test_legacy_profile_defaults_and_family_rejection_are_preserved():
+    for name in ("healthcare", "semiconductor", "tech"):
+        assert not PROFILES[name].allow_other_job_family
+        assert PROFILES[name].responsibility_terms == []
+
+    parsed = parse_job(
+        raw("Lead Software Engineer - Data Platform", "Coordinate projects.")
+    )
+    result = match_job(parsed, PROFILES["tech"], PREFERENCES)
+
+    assert not result.eligible
+    assert result.filtered_reason == "job_family"
+
+
+def test_discovery_configuration_and_company_scope():
+    assert PREFERENCES.location_terms == []
+    assert PREFERENCES.include_remote
+    assert PREFERENCES.excluded_seniorities == set()
+    assert PREFERENCES.exclude_citizenship_required
+    assert PREFERENCES.exclude_clearance_required
+    assert load_candidate(Path("config/candidate.yml")) is None
+
+    assigned = {
+        slug
+        for slug, company in COMPANIES.items()
+        if PROFILE.name in company.profiles
+    }
+    assert assigned == {"komodo-health"}
+    assert COMPANIES["nvidia"].ats_config["search_texts"] == [
+        "data",
+        "analytics",
+        "business intelligence",
+    ]
+
+    for company in COMPANIES.values():
+        assert set(company.profiles) <= set(PROFILES)
+
+
+@pytest.mark.asyncio
+async def test_company_routing_limits_generic_associate_pm_discovery(monkeypatch):
+    class FakeSourceRunner:
+        def __init__(self, client, max_concurrency):
+            pass
+
+        async def fetch(self, company):
+            return [
+                raw("Associate Project Manager").model_copy(
+                    update={"source_company": company.slug}
+                )
+            ]
+
+    monkeypatch.setattr(pipeline, "SourceRunner", FakeSourceRunner)
+    settings = Settings(
+        _env_file=None,
+        database_url=None,
+        telegram_bot_token=None,
+        telegram_chat_id=None,
+        llm_enabled=False,
+        resume_path=None,
+        resume_text=None,
+        visa_sponsorship_required=False,
+    )
+
+    for slug, expected in (
+        ("komodo-health", {PROFILE.name}),
+        ("databricks", set()),
+        ("nvidia", set()),
+    ):
+        report = await pipeline.run_pipeline(
+            settings,
+            [COMPANIES[slug]],
+            PROFILES,
+            PREFERENCES,
+            candidate=None,
+            dry_run=True,
+            run_key=f"routing-{slug}",
+        )
+
+        assert report.errors == []
+        assert {item.result.profile for item in report.dry_run_matches} == expected
+
+
+def test_ordinary_discovery_match_reaches_handoff(tmp_path):
+    posting = raw("QA Specialist", "Coordinate projects across teams.")
+    result = match_job(parse_job(posting), PROFILE, PREFERENCES)
+
+    assert result.eligible
+    assert result.score == 0.70
+    assert result.tier == "match"
+    assert not pipeline._qualifies_for_immediate_notification(
+        parse_job(posting),
+        result,
+        datetime.now(UTC),
+        Settings(_env_file=None, llm_enabled=False, resume_path=None, resume_text=None),
+        is_new=True,
+    )
+
+    db = Storage(f"sqlite:///{tmp_path / 'discovery.db'}", create_schema=True)
+    try:
+        company_id = db.sync_company(COMPANIES["komodo-health"])
+        run_id = db.start_run("clinical-handoff")
+        assert run_id is not None
+        db.persist_job_decisions(
+            company_id,
+            run_id,
+            posting,
+            db.plan_job(company_id, posting),
+            [MatchDecision(profile_version=PROFILE.version, result=result)],
+        )
+        db.finish_run(
+            run_id,
+            {"sources_attempted": 1, "sources_succeeded": 1, "jobs_fetched": 1},
+            [],
+        )
+
+        rows = db.list_handoff_jobs()
+        assert len(rows) == 1
+        assert rows[0]["profile"] == PROFILE.name
+        assert rows[0]["tier"] == "match"
+        assert "responsibilities: coordinate projects" in rows[0]["reasons"]
+        assert "description_raw" not in rows[0]
+    finally:
+        db.engine.dispose()

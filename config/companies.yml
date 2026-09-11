@@ -3,7 +3,7 @@
 companies:
   # Healthcare / payer — structured boards enabled for initial verification.
   - {slug: datavant, name: Datavant, careers_url: "https://boards.greenhouse.io/datavant", ats_type: greenhouse, ats_config: {board_token: datavant}, industry: healthcare, profiles: [healthcare, tech], priority: 1, enabled: false, source_verified: false}
-  - {slug: komodo-health, name: Komodo Health, careers_url: "https://boards.greenhouse.io/komodohealth", ats_type: greenhouse, ats_config: {board_token: komodohealth}, industry: healthcare, profiles: [healthcare, tech], priority: 1, enabled: true, source_verified: true}
+  - {slug: komodo-health, name: Komodo Health, careers_url: "https://boards.greenhouse.io/komodohealth", ats_type: greenhouse, ats_config: {board_token: komodohealth}, industry: healthcare, profiles: [healthcare, tech, clinical-discovery], priority: 1, enabled: true, source_verified: true}
   - {slug: clarify-health, name: Clarify Health, careers_url: "https://boards.greenhouse.io/clarifyhealth", ats_type: greenhouse, ats_config: {board_token: clarifyhealth}, industry: healthcare, profiles: [healthcare, tech], priority: 1, enabled: false, source_verified: false}
   - {slug: cohere-health, name: Cohere Health, careers_url: "https://boards.greenhouse.io/coherehealth", ats_type: greenhouse, ats_config: {board_token: coherehealth}, industry: healthcare, profiles: [healthcare, tech], priority: 1, enabled: false, source_verified: true}
   - {slug: oscar-health, name: Oscar Health, careers_url: "https://boards.greenhouse.io/oscar", ats_type: greenhouse, ats_config: {board_token: oscar}, industry: healthcare, profiles: [healthcare, tech], priority: 1, enabled: false, source_verified: true}
