@@ -38,6 +38,15 @@ def company(ats_type, ats_config):
         "alkeus",
         "faeththerapeutics",
         "iovancebiotherapeutics",
+        "relaytherapeutics",
+        "legendcareers",
+        "citytherapeutics",
+        "dianthustherapeutics",
+        "nurix",
+        "plianttherapeuticsinc",
+        "pfm",
+        "iterativehealth",
+        "mazetherapeutics",
     ],
 )
 @respx.mock
@@ -86,6 +95,17 @@ async def test_lever_adapter():
     async with httpx.AsyncClient() as client:
         rows = await LeverSource(company("lever", {"site": "acme"}), client).fetch()
     assert len(rows) == 1
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_lightship_lever_adapter():
+    respx.get("https://api.lever.co/v0/postings/lightship?mode=json").mock(
+        return_value=httpx.Response(200, json=[])
+    )
+    async with httpx.AsyncClient() as client:
+        rows = await LeverSource(company("lever", {"site": "lightship"}), client).fetch()
+    assert rows == []
 
 
 @pytest.mark.asyncio

@@ -37,6 +37,16 @@ def test_biotech_sources_are_clinical_discovery_only():
         "alkeus": ("greenhouse", {"board_token": "alkeus"}),
         "faeth-therapeutics": ("greenhouse", {"board_token": "faeththerapeutics"}),
         "iovance-biotherapeutics": ("greenhouse", {"board_token": "iovancebiotherapeutics"}),
+        "relay-therapeutics": ("greenhouse", {"board_token": "relaytherapeutics"}),
+        "legend-biotech": ("greenhouse", {"board_token": "legendcareers"}),
+        "city-therapeutics": ("greenhouse", {"board_token": "citytherapeutics"}),
+        "dianthus-therapeutics": ("greenhouse", {"board_token": "dianthustherapeutics"}),
+        "nurix-therapeutics": ("greenhouse", {"board_token": "nurix"}),
+        "lightship": ("lever", {"site": "lightship"}),
+        "pliant-therapeutics": ("greenhouse", {"board_token": "plianttherapeuticsinc"}),
+        "precision-for-medicine": ("greenhouse", {"board_token": "pfm"}),
+        "iterative-health": ("greenhouse", {"board_token": "iterativehealth"}),
+        "maze-therapeutics": ("greenhouse", {"board_token": "mazetherapeutics"}),
     }
     for slug, (ats_type, ats_config) in expected.items():
         company = COMPANIES[slug]
@@ -322,6 +332,16 @@ def test_discovery_configuration_and_company_scope():
         "alkeus",
         "faeth-therapeutics",
         "iovance-biotherapeutics",
+        "relay-therapeutics",
+        "legend-biotech",
+        "city-therapeutics",
+        "dianthus-therapeutics",
+        "nurix-therapeutics",
+        "lightship",
+        "pliant-therapeutics",
+        "precision-for-medicine",
+        "iterative-health",
+        "maze-therapeutics",
     }
     assert COMPANIES["nvidia"].ats_config["search_texts"] == [
         "data",
