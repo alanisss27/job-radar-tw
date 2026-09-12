@@ -84,6 +84,10 @@ class ProfileConfig(BaseModel):
     responsibility_terms: list[str] = Field(default_factory=list)
     domain_terms: list[str]
     skills: list[str]
+    responsibility_title_terms: list[str] = Field(default_factory=list)
+    responsibility_title_exclude_terms: list[str] = Field(default_factory=list)
+    responsibility_min_hits: int = Field(default=1, ge=1)
+    responsibility_requires_domain: bool = False
     gap_terms: dict[str, list[str]] = Field(default_factory=dict)
 
     @field_validator("name")

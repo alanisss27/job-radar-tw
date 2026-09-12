@@ -6,10 +6,39 @@ profiles:
     threshold: 0.70
     strong_threshold: 0.90
     allow_other_job_family: true
+    responsibility_min_hits: 2
+    responsibility_requires_domain: true
+    responsibility_title_terms:
+      - clinical
+      - trial
+      - validation
+      - gmp
+      - gxp
+      - laboratory operations
+      - lab operations
+      - quality operations
+      - scientific operations
+      - technical operations
+      - clinical operations
+      - research operations
+      - operational excellence
+    responsibility_title_exclude_terms:
+      - analytics consultant
+      - analytics consulting
+      - analytics engineer
+      - data scientist
+      - it analyst
+      - software engineer
+      - software developer
+      - ai product manager
+      - product manager
     weights: {title: 0.70, domain: 0.30}
     title_terms:
       - clinical project manager
-      - associate project manager
+      - associate project manager — clinical
+      - associate project manager - clinical
+      - associate project manager — life sciences
+      - associate project manager - life sciences
       - clinical project coordinator
       - clinical operations project coordinator
       - clinical operations project manager
@@ -37,9 +66,6 @@ profiles:
     # Description evidence can qualify any title or job family.
     # Operational Excellence titles require this evidence.
     responsibility_terms:
-      - project management
-      - project coordination
-      - program coordination
       - manage projects
       - managing projects
       - coordinate projects
@@ -49,8 +75,6 @@ profiles:
       - project timelines
       - project milestones
       - project deliverables
-      - cross-functional projects
-      - cross functional projects
       - validation projects
       - study start-up
       - study startup

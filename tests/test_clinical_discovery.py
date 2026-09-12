@@ -19,10 +19,7 @@ from job_monitor.storage import MatchDecision, Storage
 PROFILES = load_profiles(Path("config/profiles.yml"))
 PROFILE = PROFILES["clinical-discovery"]
 PREFERENCES = load_preferences(Path("config/preferences.yml"))
-COMPANIES = {
-    company.slug: company
-    for company in load_companies(Path("config/companies.yml"))
-}
+COMPANIES = {company.slug: company for company in load_companies(Path("config/companies.yml"))}
 
 
 def raw(title, description="", location="Remote"):
@@ -50,7 +47,9 @@ def match(title, description="", location="Remote"):
         "Associate Clinical Project Manager",
         "Clinical Project Manager",
         "Associate Project Manager — Clinical",
+        "Associate Project Manager - Clinical",
         "Associate Project Manager — Life Sciences",
+        "Associate Project Manager - Life Sciences",
         "Clinical Project Coordinator",
         "Clinical Operations Project Coordinator",
         "Clinical Operations Project Manager",
@@ -84,34 +83,66 @@ def test_requested_titles_qualify_without_description(title):
 @pytest.mark.parametrize(
     "title",
     [
-        "Laboratory Technician",
-        "QC Scientist",
-        "QA Specialist",
         "Clinical Data Specialist",
-        "Research Scientist",
-        "Operations Associate",
-        "Unfamiliar Role",
+        "Laboratory Operations Specialist",
+        "Quality Operations Specialist",
+        "Validation Specialist",
+        "Scientific Operations Associate",
+        "Operational Excellence Project Manager",
     ],
 )
 def test_responsibilities_qualify_without_pm_title(title):
-    parsed = parse_job(raw(title, "Coordinate projects across teams."))
+    parsed = parse_job(
+        raw(
+            title,
+            "Coordinate projects across teams. Track project milestones for clinical operations.",
+        )
+    )
     result = match_job(parsed, PROFILE, PREFERENCES)
 
     assert result.eligible
     assert result.score >= PROFILE.threshold
-    assert "responsibilities: coordinate projects" in result.reasons
+    assert any(
+        reason.startswith("responsibilities:") and "coordinate projects" in reason
+        for reason in result.reasons
+    )
 
 
-@pytest.mark.parametrize("term", PROFILE.responsibility_terms)
-def test_each_configured_responsibility_can_supply_role_evidence(term):
-    assert match("Unfamiliar Role", f"Responsibilities include {term}.").eligible
+def test_one_responsibility_hit_is_not_enough():
+    result = match(
+        "Clinical Data Specialist",
+        "Coordinate projects for clinical operations.",
+    )
+    assert not result.eligible
+    assert result.filtered_reason == "discovery_responsibility_evidence"
+
+
+def test_responsibility_evidence_requires_domain():
+    result = match(
+        "Technical Operations Specialist",
+        "Coordinate projects and track project milestones for a general platform.",
+    )
+    assert not result.eligible
+    assert result.filtered_reason == "discovery_responsibility_evidence"
+
+
+def test_responsibility_evidence_requires_title_anchor():
+    result = match(
+        "Research Scientist",
+        "Coordinate projects and track project milestones for clinical operations.",
+    )
+    assert not result.eligible
+    assert result.filtered_reason == "discovery_responsibility_evidence"
 
 
 def test_operational_excellence_requires_responsibility_evidence():
     title = "Operational Excellence Project Manager"
 
     assert not match(title, "Improve routine operational efficiency.").eligible
-    assert match(title, "Own project milestones and project deliverables.").eligible
+    assert match(
+        title,
+        "Own project milestones and project deliverables for clinical operations.",
+    ).eligible
 
 
 @pytest.mark.parametrize(
@@ -119,22 +150,28 @@ def test_operational_excellence_requires_responsibility_evidence():
     [
         "Nonclinical Project Manager",
         "Preclinical Project Manager",
-        "Clinical Trial Associateship",
-        "Clinical Operations Specialistship",
+        "Trial Associateship",
+        "Operations Specialistship",
     ],
 )
 def test_title_phrases_do_not_match_inside_longer_words(title):
     assert not match(title).eligible
-    assert match(title, "Coordinate projects across teams.").eligible
+    assert not match(
+        title,
+        "Coordinate projects and track project milestones for a general platform.",
+    ).eligible
 
 
 def test_responsibility_phrases_do_not_match_inside_longer_words():
-    assert not match("Unfamiliar Role", "Supercoordinate projects.").eligible
+    assert not match("Clinical Data Specialist", "Supercoordinate projects.").eligible
 
 
 def test_matching_is_case_insensitive_and_accepts_title_suffixes():
     assert match("ASSOCIATE CLINICAL PROJECT MANAGER (CONTRACT)").eligible
-    assert match("Unfamiliar Role", "COORDINATE PROJECTS.").eligible
+    assert match(
+        "Clinical Data Specialist",
+        "COORDINATE PROJECTS and track PROJECT MILESTONES for clinical operations.",
+    ).eligible
 
 
 def test_domain_words_alone_do_not_qualify():
@@ -196,13 +233,38 @@ def test_legacy_profile_defaults_and_family_rejection_are_preserved():
         assert not PROFILES[name].allow_other_job_family
         assert PROFILES[name].responsibility_terms == []
 
-    parsed = parse_job(
-        raw("Lead Software Engineer - Data Platform", "Coordinate projects.")
-    )
+    parsed = parse_job(raw("Lead Software Engineer - Data Platform", "Coordinate projects."))
     result = match_job(parsed, PROFILES["tech"], PREFERENCES)
 
     assert not result.eligible
     assert result.filtered_reason == "job_family"
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "IT Analyst",
+        "Analytics Consultant",
+        "Analytics Consulting",
+        "Analytics Engineer",
+        "Data Scientist",
+        "Software Engineer",
+        "Software Developer",
+        "AI Product Manager",
+        "Product Manager",
+        "Bench Scientist",
+        "Research Scientist",
+        "QA Analyst",
+        "QC Specialist",
+    ],
+)
+def test_unrelated_titles_do_not_qualify_from_project_language(title):
+    result = match(
+        title,
+        "Coordinate projects and track project milestones for clinical operations.",
+    )
+    assert not result.eligible
+    assert result.filtered_reason == "discovery_responsibility_evidence"
 
 
 def test_discovery_configuration_and_company_scope():
@@ -212,12 +274,11 @@ def test_discovery_configuration_and_company_scope():
     assert PREFERENCES.exclude_citizenship_required
     assert PREFERENCES.exclude_clearance_required
     assert load_candidate(Path("config/candidate.yml")) is None
+    assert COMPANIES["komodo-health"].profiles == ["clinical-discovery"]
+    assert not COMPANIES["databricks"].enabled
+    assert not COMPANIES["nvidia"].enabled
 
-    assigned = {
-        slug
-        for slug, company in COMPANIES.items()
-        if PROFILE.name in company.profiles
-    }
+    assigned = {slug for slug, company in COMPANIES.items() if PROFILE.name in company.profiles}
     assert assigned == {"komodo-health"}
     assert COMPANIES["nvidia"].ats_config["search_texts"] == [
         "data",
@@ -237,9 +298,7 @@ async def test_company_routing_limits_generic_associate_pm_discovery(monkeypatch
 
         async def fetch(self, company):
             return [
-                raw("Associate Project Manager").model_copy(
-                    update={"source_company": company.slug}
-                )
+                raw("Associate Project Manager").model_copy(update={"source_company": company.slug})
             ]
 
     monkeypatch.setattr(pipeline, "SourceRunner", FakeSourceRunner)
@@ -255,7 +314,7 @@ async def test_company_routing_limits_generic_associate_pm_discovery(monkeypatch
     )
 
     for slug, expected in (
-        ("komodo-health", {PROFILE.name}),
+        ("komodo-health", set()),
         ("databricks", set()),
         ("nvidia", set()),
     ):
@@ -274,11 +333,14 @@ async def test_company_routing_limits_generic_associate_pm_discovery(monkeypatch
 
 
 def test_ordinary_discovery_match_reaches_handoff(tmp_path):
-    posting = raw("QA Specialist", "Coordinate projects across teams.")
+    posting = raw(
+        "Quality Operations Specialist",
+        "Coordinate projects and track project milestones for clinical operations.",
+    )
     result = match_job(parse_job(posting), PROFILE, PREFERENCES)
 
     assert result.eligible
-    assert result.score == 0.70
+    assert result.score >= PROFILE.threshold
     assert result.tier == "match"
     assert not pipeline._qualifies_for_immediate_notification(
         parse_job(posting),
@@ -310,7 +372,10 @@ def test_ordinary_discovery_match_reaches_handoff(tmp_path):
         assert len(rows) == 1
         assert rows[0]["profile"] == PROFILE.name
         assert rows[0]["tier"] == "match"
-        assert "responsibilities: coordinate projects" in rows[0]["reasons"]
+        assert any(
+            reason.startswith("responsibilities:") and "coordinate projects" in reason
+            for reason in rows[0]["reasons"]
+        )
         assert "description_raw" not in rows[0]
     finally:
         db.engine.dispose()

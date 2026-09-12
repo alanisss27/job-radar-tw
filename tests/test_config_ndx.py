@@ -109,6 +109,30 @@ def test_public_config_models_reject_misspelled_fields():
         )
 
 
+def test_profile_discovery_fields_have_safe_defaults_and_validate():
+    profile = ProfileConfig(
+        name="discovery",
+        weights={"title": 1.0},
+        title_terms=["manager"],
+        domain_terms=[],
+        skills=[],
+    )
+    assert profile.responsibility_title_terms == []
+    assert profile.responsibility_title_exclude_terms == []
+    assert profile.responsibility_min_hits == 1
+    assert not profile.responsibility_requires_domain
+
+    with pytest.raises(ValidationError):
+        ProfileConfig(
+            name="discovery",
+            weights={"title": 1.0},
+            title_terms=["manager"],
+            domain_terms=[],
+            skills=[],
+            responsibility_min_hits=0,
+        )
+
+
 @pytest.mark.asyncio
 @respx.mock
 async def test_ndx_snapshot_rejects_partial_response():

@@ -109,9 +109,7 @@ def _discovery_hits(text: str, terms: list[str]) -> set[str]:
         term.strip().lower()
         for term in terms
         if term.strip()
-        and re.search(
-            r"(?<!\w)" + re.escape(term.strip()) + r"(?!\w)", text, re.IGNORECASE
-        )
+        and re.search(r"(?<!\w)" + re.escape(term.strip()) + r"(?!\w)", text, re.IGNORECASE)
     }
 
 
@@ -400,9 +398,27 @@ def match_job(
         if profile.allow_other_job_family
         else _contains(title_text, profile.title_terms)
     )
-    responsibility_hits = _discovery_hits(
-        job.raw.description_raw, profile.responsibility_terms
+    responsibility_hits = _discovery_hits(job.raw.description_raw, profile.responsibility_terms)
+    domain_hits = _discovery_hits(title_desc, profile.domain_terms)
+    responsibility_title_hits = _discovery_hits(title_text, profile.responsibility_title_terms)
+    responsibility_title_exclusions = _discovery_hits(
+        title_text, profile.responsibility_title_exclude_terms
     )
+    if profile.allow_other_job_family and not title_hit and responsibility_hits:
+        if (
+            len(responsibility_hits) < profile.responsibility_min_hits
+            or profile.responsibility_requires_domain
+            and not domain_hits
+            or not responsibility_title_hits
+            or responsibility_title_exclusions
+        ):
+            return MatchResult(
+                profile=profile.name,
+                score=0,
+                eligible=False,
+                tier="filtered",
+                filtered_reason="discovery_responsibility_evidence",
+            )
     title_score = 1.0 if title_hit or responsibility_hits else 0.0
     profile_domain_score = min(
         1.0, sum(term.lower() in title_desc for term in profile.domain_terms) / 3
