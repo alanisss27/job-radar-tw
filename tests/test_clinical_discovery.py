@@ -22,6 +22,26 @@ PREFERENCES = load_preferences(Path("config/preferences.yml"))
 COMPANIES = {company.slug: company for company in load_companies(Path("config/companies.yml"))}
 
 
+def test_biotech_sources_are_clinical_discovery_only():
+    expected = {
+        "orca-bio": ("lever", {"site": "orcabiosystems"}),
+        "praxis-precision-medicines": ("greenhouse", {"board_token": "praxisprecisionmedicines"}),
+        "campfield-therapeutics": ("greenhouse", {"board_token": "campfieldtherapeuticsinc"}),
+        "treeline-biosciences": ("greenhouse", {"board_token": "treelinebiosciences"}),
+        "disc-medicine": ("greenhouse", {"board_token": "discmedicine"}),
+    }
+    for slug, (ats_type, ats_config) in expected.items():
+        company = COMPANIES[slug]
+        assert company.enabled
+        assert company.profiles == ["clinical-discovery"]
+        assert company.ats_type.value == ats_type
+        assert company.ats_config == ats_config
+
+    assert COMPANIES["komodo-health"].profiles == ["clinical-discovery"]
+    assert not COMPANIES["databricks"].enabled
+    assert not COMPANIES["nvidia"].enabled
+
+
 def raw(title, description="", location="Remote"):
     return RawJob(
         source_company="komodo-health",
@@ -279,7 +299,14 @@ def test_discovery_configuration_and_company_scope():
     assert not COMPANIES["nvidia"].enabled
 
     assigned = {slug for slug, company in COMPANIES.items() if PROFILE.name in company.profiles}
-    assert assigned == {"komodo-health"}
+    assert assigned == {
+        "komodo-health",
+        "orca-bio",
+        "praxis-precision-medicines",
+        "campfield-therapeutics",
+        "treeline-biosciences",
+        "disc-medicine",
+    }
     assert COMPANIES["nvidia"].ats_config["search_texts"] == [
         "data",
         "analytics",
