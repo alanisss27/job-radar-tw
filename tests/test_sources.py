@@ -27,9 +27,22 @@ def company(ats_type, ats_config):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "token",
+    [
+        "spyretherapeutics",
+        "apogeetherapeutics",
+        "seaporttherapeutics",
+        "peptilogics",
+        "kailera",
+        "alkeus",
+        "faeththerapeutics",
+        "iovancebiotherapeutics",
+    ],
+)
 @respx.mock
-async def test_greenhouse_adapter():
-    respx.get("https://boards-api.greenhouse.io/v1/boards/acme/jobs?content=true").mock(
+async def test_greenhouse_adapter(token):
+    respx.get(f"https://boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -39,7 +52,7 @@ async def test_greenhouse_adapter():
                         "title": "Senior Data Analyst",
                         "location": {"name": "Remote US"},
                         "content": "<p>SQL</p>",
-                        "absolute_url": "https://boards.greenhouse.io/acme/jobs/7",
+                        "absolute_url": f"https://boards.greenhouse.io/{token}/jobs/7",
                         "updated_at": "2026-06-17T12:00:00Z",
                     }
                 ]
@@ -47,9 +60,7 @@ async def test_greenhouse_adapter():
         )
     )
     async with httpx.AsyncClient() as client:
-        rows = await GreenhouseSource(
-            company("greenhouse", {"board_token": "acme"}), client
-        ).fetch()
+        rows = await GreenhouseSource(company("greenhouse", {"board_token": token}), client).fetch()
     assert rows[0].external_job_id == "7"
     assert rows[0].description_raw == "SQL"
 

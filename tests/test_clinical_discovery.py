@@ -29,6 +29,14 @@ def test_biotech_sources_are_clinical_discovery_only():
         "campfield-therapeutics": ("greenhouse", {"board_token": "campfieldtherapeuticsinc"}),
         "treeline-biosciences": ("greenhouse", {"board_token": "treelinebiosciences"}),
         "disc-medicine": ("greenhouse", {"board_token": "discmedicine"}),
+        "spyre-therapeutics": ("greenhouse", {"board_token": "spyretherapeutics"}),
+        "apogee-therapeutics": ("greenhouse", {"board_token": "apogeetherapeutics"}),
+        "seaport-therapeutics": ("greenhouse", {"board_token": "seaporttherapeutics"}),
+        "peptilogics": ("greenhouse", {"board_token": "peptilogics"}),
+        "kailera": ("greenhouse", {"board_token": "kailera"}),
+        "alkeus": ("greenhouse", {"board_token": "alkeus"}),
+        "faeth-therapeutics": ("greenhouse", {"board_token": "faeththerapeutics"}),
+        "iovance-biotherapeutics": ("greenhouse", {"board_token": "iovancebiotherapeutics"}),
     }
     for slug, (ats_type, ats_config) in expected.items():
         company = COMPANIES[slug]
@@ -306,6 +314,14 @@ def test_discovery_configuration_and_company_scope():
         "campfield-therapeutics",
         "treeline-biosciences",
         "disc-medicine",
+        "spyre-therapeutics",
+        "apogee-therapeutics",
+        "seaport-therapeutics",
+        "peptilogics",
+        "kailera",
+        "alkeus",
+        "faeth-therapeutics",
+        "iovance-biotherapeutics",
     }
     assert COMPANIES["nvidia"].ats_config["search_texts"] == [
         "data",
