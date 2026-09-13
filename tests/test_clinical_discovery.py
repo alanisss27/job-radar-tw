@@ -56,7 +56,6 @@ def test_biotech_sources_are_clinical_discovery_only():
         "mineralys-therapeutics": ("greenhouse", {"board_token": "mineralystherapeutics"}),
         "kura-oncology": ("greenhouse", {"board_token": "kuraoncology"}),
         "tango-therapeutics": ("greenhouse", {"board_token": "tangotherapeutics"}),
-        "arcellx": ("greenhouse", {"board_token": "arcellx"}),
         "kymera-therapeutics": ("greenhouse", {"board_token": "KymeraTherapeutics"}),
         "cullinan-therapeutics": ("lever", {"site": "cullinanoncology"}),
         "endpoint-clinical": ("lever", {"site": "endpointclinical"}),
@@ -80,6 +79,7 @@ def test_biotech_sources_are_clinical_discovery_only():
         assert company.ats_config == ats_config
 
     assert COMPANIES["komodo-health"].profiles == ["clinical-discovery"]
+    assert not COMPANIES["arcellx"].enabled
     assert not COMPANIES["databricks"].enabled
     assert not COMPANIES["nvidia"].enabled
 
