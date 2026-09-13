@@ -245,6 +245,125 @@ async def test_workday_searches_and_deduplicates():
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_workday_paginates_when_later_pages_report_zero_total():
+    endpoint = "https://acme.wd1.myworkdayjobs.com/wday/cxs/acme/External/jobs"
+
+    def postings(start, count):
+        return [
+            {
+                "title": f"Project Manager {index}",
+                "externalPath": f"/job/US/Project-Manager_{index}",
+                "locationsText": "United States",
+            }
+            for index in range(start, start + count)
+        ]
+
+    route = respx.post(endpoint)
+    route.side_effect = [
+        httpx.Response(200, json={"total": 217, "jobPostings": postings(0, 2)}),
+        httpx.Response(200, json={"total": 0, "jobPostings": postings(1, 2)}),
+        httpx.Response(200, json={"total": 0, "jobPostings": postings(3, 2)}),
+        httpx.Response(200, json={"total": 0, "jobPostings": postings(5, 1)}),
+    ]
+    cfg = company(
+        "workday",
+        {
+            "endpoint": endpoint,
+            "site": "acme.wd1.myworkdayjobs.com",
+            "detail_base_url": "https://acme.wd1.myworkdayjobs.com/en-US/External",
+            "limit": 2,
+        },
+    )
+
+    async with httpx.AsyncClient() as client:
+        rows = await WorkdaySource(cfg, client).fetch()
+
+    assert len(rows) == 6
+    assert len(route.calls) == 4
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_workday_pagination_stops_at_short_page_and_supports_agc_shape():
+    endpoint = "https://acme.wd1.myworkdayjobs.com/wday/cxs/acme/External/jobs"
+
+    def postings(start, count):
+        return [
+            {
+                "title": f"Job {index}",
+                "externalPath": f"/job/US/Job_{index}",
+                "locationsText": "United States",
+            }
+            for index in range(start, start + count)
+        ]
+
+    route = respx.post(endpoint)
+    route.side_effect = [
+        httpx.Response(200, json={"total": 25, "jobPostings": postings(0, 20)}),
+        httpx.Response(200, json={"total": 0, "jobPostings": postings(20, 5)}),
+    ]
+    cfg = company(
+        "workday",
+        {
+            "endpoint": endpoint,
+            "site": "acme.wd1.myworkdayjobs.com",
+            "detail_base_url": "https://acme.wd1.myworkdayjobs.com/en-US/External",
+        },
+    )
+
+    async with httpx.AsyncClient() as client:
+        rows = await WorkdaySource(cfg, client).fetch()
+
+    assert len(rows) == 25
+    assert len(route.calls) == 2
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_workday_pagination_honors_positive_total_on_every_page():
+    endpoint = "https://acme.wd1.myworkdayjobs.com/wday/cxs/acme/External/jobs"
+    route = respx.post(endpoint)
+    route.side_effect = [
+        httpx.Response(
+            200,
+            json={
+                "total": 4,
+                "jobPostings": [
+                    {"title": "Job 1", "externalPath": "/job/US/Job_1"},
+                    {"title": "Job 2", "externalPath": "/job/US/Job_2"},
+                ],
+            },
+        ),
+        httpx.Response(
+            200,
+            json={
+                "total": 4,
+                "jobPostings": [
+                    {"title": "Job 3", "externalPath": "/job/US/Job_3"},
+                    {"title": "Job 4", "externalPath": "/job/US/Job_4"},
+                ],
+            },
+        ),
+    ]
+    cfg = company(
+        "workday",
+        {
+            "endpoint": endpoint,
+            "site": "acme.wd1.myworkdayjobs.com",
+            "detail_base_url": "https://acme.wd1.myworkdayjobs.com/en-US/External",
+            "limit": 2,
+        },
+    )
+
+    async with httpx.AsyncClient() as client:
+        rows = await WorkdaySource(cfg, client).fetch()
+
+    assert len(rows) == 4
+    assert len(route.calls) == 2
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_workday_detail_api_replaces_listing_description():
     endpoint = "https://acme.wd1.myworkdayjobs.com/wday/cxs/acme/External/jobs"
     external_path = "/job/Bothell-Washington-USA/Project-Manager_JR103037"

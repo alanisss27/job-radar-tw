@@ -280,6 +280,7 @@ class WorkdaySource(JobSource):
         search_texts = cfg.get("search_texts") or [""]
         for search_text in search_texts:
             offset = 0
+            reported_total: int | None = None
             while True:
                 response = await self.client.post(
                     endpoint,
@@ -298,6 +299,9 @@ class WorkdaySource(JobSource):
                     raise SourceError(
                         f"Workday response for {self.company.slug} has no valid jobPostings list"
                     )
+                page_total = payload.get("total")
+                if isinstance(page_total, int) and page_total > 0:
+                    reported_total = page_total
                 postings = payload["jobPostings"]
                 for item in postings:
                     if not isinstance(item, dict):
@@ -342,7 +346,11 @@ class WorkdaySource(JobSource):
                         metadata={"workday": item},
                     )
                 offset += len(postings)
-                if not postings or offset >= int(payload.get("total", offset)):
+                if not postings:
+                    break
+                if reported_total is not None and offset >= reported_total:
+                    break
+                if len(postings) < limit:
                     break
         return jobs
 
