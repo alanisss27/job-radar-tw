@@ -32,6 +32,11 @@ profiles:
       - software developer
       - ai product manager
       - product manager
+      - sas programmer
+      - statistical programmer
+      - statistician
+      - biostatistician
+      - clinical programmer
     weights: {title: 0.70, domain: 0.30}
     title_terms:
       - clinical project manager
