@@ -482,6 +482,8 @@ def test_discovery_configuration_and_company_scope():
         "heartflow",
         "syner-g",
         "natera",
+        "agc-biologics",
+        "worldwide-clinical-trials",
     }
     assert COMPANIES["nvidia"].ats_config["search_texts"] == [
         "data",
