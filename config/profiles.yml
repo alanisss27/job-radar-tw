@@ -1,6 +1,6 @@
 profiles:
   - name: clinical-discovery
-    version: "1.0"
+    version: "1.1"
     # Assign only to relevant healthcare/life-science employers.
     # Scores indicate discovery evidence, not candidate fit.
     threshold: 0.70
