@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 from datetime import UTC, datetime
+from zoneinfo import ZoneInfo
 
 import httpx
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
@@ -29,11 +30,13 @@ def render_freshness(
     *,
     is_new: bool = False,
     changed: bool = False,
+    display_timezone: str = "America/New_York",
 ) -> str:
     first_seen = _as_utc(first_seen_at)
+    first_seen_display_date = first_seen.astimezone(ZoneInfo(display_timezone)).date()
     if posted_at is None:
         suffix = "｜本次新發現" if is_new else "｜內容更新" if changed else ""
-        return f"首次發現 {first_seen.date().isoformat()}；來源日期未知{suffix}"
+        return f"首次發現 {first_seen_display_date.isoformat()}；來源日期未知{suffix}"
 
     posted = _as_utc(posted_at)
     age = source_age_days(posted, first_seen)
@@ -52,7 +55,7 @@ def render_freshness(
     if is_new and age > 3:
         suffix += "（本次新發現）"
     freshness = f"來源 {age} 天前｜{label}{suffix}"
-    return f"\u9996\u6b21\u767c\u73fe\uff1a{first_seen.date().isoformat()}\uff1b\u4f86\u6e90\u65e5\u671f\uff1a{posted.date().isoformat()}\uff08{freshness}\uff09"
+    return f"\u9996\u6b21\u767c\u73fe\uff1a{first_seen_display_date.isoformat()}\uff1b\u4f86\u6e90\u65e5\u671f\uff1a{posted.date().isoformat()}\uff08{freshness}\uff09"
 
 
 def render_job_message(
@@ -63,6 +66,7 @@ def render_job_message(
     *,
     is_new: bool = False,
     changed: bool = False,
+    display_timezone: str = "America/New_York",
 ) -> str:
     badge = (
         "🪜 延伸挑戰"
@@ -71,7 +75,13 @@ def render_job_message(
     )
     reasons = "、".join(result.reasons) or "規則配對"
     gaps = "、".join(result.gaps) or "無明顯缺口"
-    freshness = render_freshness(job.raw.posted_at, first_seen_at, is_new=is_new, changed=changed)
+    freshness = render_freshness(
+        job.raw.posted_at,
+        first_seen_at,
+        is_new=is_new,
+        changed=changed,
+        display_timezone=display_timezone,
+    )
     return (
         f"{badge} | {html.escape(str(result.profile))} | {result.score:.0%}\n"
         f"<b>{html.escape(company_name)} - {html.escape(job.raw.title)}</b>\n"
@@ -100,6 +110,7 @@ def render_run_summary(
     matched_jobs: list[MatchedJob],
     zero_job_sources: list[str],
     max_matches: int = 8,
+    display_timezone: str = "America/New_York",
 ) -> str:
     fresh_matches = sum(1 for item in matched_jobs if item.is_new)
     lines = [
@@ -140,6 +151,7 @@ def render_run_summary(
                 item.first_seen_at,
                 is_new=item.is_new,
                 changed=item.changed,
+                display_timezone=display_timezone,
             )
             lines.append(
                 f"- {html.escape(item.company_name)} - "
@@ -157,6 +169,7 @@ def render_run_summary(
                 item.first_seen_at,
                 is_new=item.is_new,
                 changed=item.changed,
+                display_timezone=display_timezone,
             )
             lines.append(
                 f"- {html.escape(item.company_name)} - "

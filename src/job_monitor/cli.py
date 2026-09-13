@@ -156,6 +156,7 @@ def dry_run_command(
                 item.job,
                 item.result,
                 item.first_seen_at,
+                display_timezone=settings.monitor_timezone,
             )
         )
     if not report.sources_succeeded and report.sources_attempted:

@@ -404,6 +404,7 @@ async def run_pipeline(
                                     matched.first_seen_at,
                                     is_new=matched.is_new,
                                     changed=matched.changed,
+                                    display_timezone=settings.monitor_timezone,
                                 )
                         decisions.append(
                             MatchDecision(
@@ -500,6 +501,7 @@ async def run_pipeline(
                         matched_jobs=report.matched_jobs,
                         zero_job_sources=report.zero_job_sources,
                         max_matches=settings.daily_summary_max_matches,
+                        display_timezone=settings.monitor_timezone,
                     ),
                     report,
                     context="daily summary",

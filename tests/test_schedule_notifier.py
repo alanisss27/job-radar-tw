@@ -130,7 +130,7 @@ def test_job_message_includes_freshness():
     assert "新鮮度" in message
     assert "2026-06-25" in message
     assert (
-        "\u9996\u6b21\u767c\u73fe\uff1a2026-06-26\uff1b\u4f86\u6e90\u65e5\u671f\uff1a2026-06-25"
+        "\u9996\u6b21\u767c\u73fe\uff1a2026-06-25\uff1b\u4f86\u6e90\u65e5\u671f\uff1a2026-06-25"
         in message
     )
     assert "?????" not in message
@@ -319,6 +319,31 @@ def test_freshness_handles_unknown_date_and_content_change():
         "\u4f86\u6e90 5 \u5929\u524d\uff5c\u8fd1\u671f\uff5c\u5167\u5bb9\u66f4\u65b0"
         in render_freshness(posted, first_seen, changed=True)
     )
+
+
+@pytest.mark.parametrize(
+    ("timezone", "expected_date"),
+    [
+        ("America/New_York", "2026-09-12"),
+        ("Asia/Taipei", "2026-09-13"),
+    ],
+)
+def test_freshness_renders_first_seen_date_in_configured_timezone(timezone, expected_date):
+    first_seen = datetime(2026, 9, 13, 3, 30, tzinfo=UTC)
+    posted = datetime(2026, 9, 10, 3, 30, tzinfo=UTC)
+
+    rendered = render_freshness(posted, first_seen, display_timezone=timezone)
+
+    assert f"\u9996\u6b21\u767c\u73fe\uff1a{expected_date}" in rendered
+    assert "\u4f86\u6e90 3 \u5929\u524d\uff5c\u65b0\u767c\u5e03" in rendered
+
+
+def test_freshness_timezone_conversion_handles_standard_time():
+    first_seen = datetime(2026, 1, 18, 4, 30, tzinfo=UTC)
+    rendered = render_freshness(None, first_seen, display_timezone="America/New_York")
+
+    assert "\u9996\u6b21\u767c\u73fe 2026-01-17" in rendered
+    assert "\u4f86\u6e90\u65e5\u671f\u672a\u77e5" in rendered
 
 
 def test_summary_removes_generic_new_marker_and_shows_update_status():
