@@ -24,23 +24,45 @@ def source_age_days(posted_at: datetime | None, reference_at: datetime | None = 
 
 
 def render_freshness(
-    posted_at: datetime | None, first_seen_at: datetime, *, compact: bool = False
+    posted_at: datetime | None,
+    first_seen_at: datetime,
+    *,
+    is_new: bool = False,
+    changed: bool = False,
 ) -> str:
     first_seen = _as_utc(first_seen_at)
     if posted_at is None:
-        if compact:
-            return f"first seen {first_seen.date().isoformat()}; source date unknown"
-        return f"首次發現：{first_seen.date().isoformat()}；來源日期：未提供"
+        suffix = "｜本次新發現" if is_new else "｜內容更新" if changed else ""
+        return f"首次發現 {first_seen.date().isoformat()}；來源日期未知{suffix}"
 
     posted = _as_utc(posted_at)
     age = source_age_days(posted, first_seen)
-    if compact:
-        return f"first seen {first_seen.date().isoformat()}; source {age}d old"
-    return f"首次發現：{first_seen.date().isoformat()}；來源日期：{posted.date().isoformat()}（約 {age} 天前）"
+    label = (
+        "新發布"
+        if age <= 3
+        else "近期"
+        if age <= 7
+        else "一般"
+        if age <= 14
+        else "較早"
+        if age <= 30
+        else "較舊"
+    )
+    suffix = "｜內容更新" if changed and not is_new else ""
+    if is_new and age > 3:
+        suffix += "（本次新發現）"
+    freshness = f"來源 {age} 天前｜{label}{suffix}"
+    return f"\u9996\u6b21\u767c\u73fe\uff1a{first_seen.date().isoformat()}\uff1b\u4f86\u6e90\u65e5\u671f\uff1a{posted.date().isoformat()}\uff08{freshness}\uff09"
 
 
 def render_job_message(
-    company_name: str, job: ParsedJob, result: MatchResult, first_seen_at: datetime
+    company_name: str,
+    job: ParsedJob,
+    result: MatchResult,
+    first_seen_at: datetime,
+    *,
+    is_new: bool = False,
+    changed: bool = False,
 ) -> str:
     badge = (
         "🪜 延伸挑戰"
@@ -49,7 +71,7 @@ def render_job_message(
     )
     reasons = "、".join(result.reasons) or "規則配對"
     gaps = "、".join(result.gaps) or "無明顯缺口"
-    freshness = render_freshness(job.raw.posted_at, first_seen_at)
+    freshness = render_freshness(job.raw.posted_at, first_seen_at, is_new=is_new, changed=changed)
     return (
         f"{badge} | {html.escape(str(result.profile))} | {result.score:.0%}\n"
         f"<b>{html.escape(company_name)} - {html.escape(job.raw.title)}</b>\n"
@@ -113,10 +135,14 @@ def render_run_summary(
         if target_jobs:
             lines.append("本次符合職缺：")
         for item in target_jobs[:max_matches]:
-            marker = "NEW " if item.is_new else ""
-            freshness = render_freshness(item.job.raw.posted_at, item.first_seen_at, compact=True)
+            freshness = render_freshness(
+                item.job.raw.posted_at,
+                item.first_seen_at,
+                is_new=item.is_new,
+                changed=item.changed,
+            )
             lines.append(
-                f"- {marker}{html.escape(item.company_name)} - "
+                f"- {html.escape(item.company_name)} - "
                 f'<a href="{html.escape(str(item.job.raw.url), quote=True)}">{html.escape(item.job.raw.title)}</a> '
                 f"({html.escape(str(item.result.profile))} {item.result.score:.0%}, "
                 f"{html.escape(item.job.raw.location_raw or '未提供')}; {html.escape(freshness)})"
@@ -126,10 +152,14 @@ def render_run_summary(
         if stretch_jobs and remaining > 0:
             lines.append("🪜 延伸職缺（高於你目前職級，可作為挑戰）：")
         for item in stretch_jobs[:remaining]:
-            marker = "NEW " if item.is_new else ""
-            freshness = render_freshness(item.job.raw.posted_at, item.first_seen_at, compact=True)
+            freshness = render_freshness(
+                item.job.raw.posted_at,
+                item.first_seen_at,
+                is_new=item.is_new,
+                changed=item.changed,
+            )
             lines.append(
-                f"- {marker}{html.escape(item.company_name)} - "
+                f"- {html.escape(item.company_name)} - "
                 f'<a href="{html.escape(str(item.job.raw.url), quote=True)}">{html.escape(item.job.raw.title)}</a> '
                 f"({html.escape(str(item.result.profile))} {item.result.score:.0%}, "
                 f"{html.escape(item.job.raw.location_raw or '未提供')}; {html.escape(freshness)})"

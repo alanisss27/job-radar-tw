@@ -402,6 +402,8 @@ async def run_pipeline(
                                     matched.job,
                                     matched.result,
                                     matched.first_seen_at,
+                                    is_new=matched.is_new,
+                                    changed=matched.changed,
                                 )
                         decisions.append(
                             MatchDecision(

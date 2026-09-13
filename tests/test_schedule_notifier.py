@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
@@ -8,6 +8,7 @@ from job_monitor.models import MatchedJob, MatchResult, ParsedJob, ProfileName, 
 from job_monitor.notifier import (
     TelegramNotifier,
     render_job_message,
+    render_freshness,
     render_run_summary,
     source_age_days,
     split_message,
@@ -105,7 +106,7 @@ def test_run_summary_lists_matches_and_source_warnings():
     assert "https://example.com/jobs/1" in summary
     assert "broken-source" in summary
     assert "Empty Verified Source" in summary
-    assert "source 1d old" in summary
+    assert "來源 1 天前｜新發布" in summary
     assert "Job Radar TW" in summary
     assert "職缺雷達" in summary
     assert "逐筆候選" in summary
@@ -128,6 +129,12 @@ def test_job_message_includes_freshness():
 
     assert "新鮮度" in message
     assert "2026-06-25" in message
+    assert (
+        "\u9996\u6b21\u767c\u73fe\uff1a2026-06-26\uff1b\u4f86\u6e90\u65e5\u671f\uff1a2026-06-25"
+        in message
+    )
+    assert "?????" not in message
+    assert "?????" not in message
     assert source_age_days(raw.posted_at, datetime(2026, 6, 26, tzinfo=UTC)) == 1
 
 
@@ -281,3 +288,62 @@ async def test_telegram_http_error_does_not_expose_bot_token():
 
     assert requests == 3
     assert token not in str(error.value)
+
+
+@pytest.mark.parametrize(
+    ("age", "label"),
+    [
+        (1, "\u65b0\u767c\u5e03"),
+        (5, "\u8fd1\u671f"),
+        (12, "\u4e00\u822c"),
+        (24, "\u8f03\u65e9"),
+        (75, "\u8f03\u820a"),
+    ],
+)
+def test_freshness_labels_show_source_age_and_discovery_status(age, label):
+    first_seen = datetime(2026, 6, 26, tzinfo=UTC)
+    posted = first_seen - timedelta(days=age)
+    rendered = render_freshness(posted, first_seen, is_new=True)
+    assert f"\u4f86\u6e90 {age} \u5929\u524d\uff5c{label}" in rendered
+    assert ("\uff08\u672c\u6b21\u65b0\u767c\u73fe\uff09" in rendered) is (age > 3)
+
+
+def test_freshness_handles_unknown_date_and_content_change():
+    first_seen = datetime(2026, 6, 26, tzinfo=UTC)
+    assert (
+        "\u4f86\u6e90\u65e5\u671f\u672a\u77e5\uff5c\u672c\u6b21\u65b0\u767c\u73fe"
+        in render_freshness(None, first_seen, is_new=True)
+    )
+    posted = first_seen - timedelta(days=5)
+    assert (
+        "\u4f86\u6e90 5 \u5929\u524d\uff5c\u8fd1\u671f\uff5c\u5167\u5bb9\u66f4\u65b0"
+        in render_freshness(posted, first_seen, changed=True)
+    )
+
+
+def test_summary_removes_generic_new_marker_and_shows_update_status():
+    raw = RawJob(
+        source_company="acme",
+        external_job_id="old-1",
+        title="Data Analyst",
+        location_raw="Austin, TX",
+        description_raw="SQL analytics",
+        posted_at=datetime(2026, 6, 1, tzinfo=UTC),
+        url="https://example.com/jobs/old-1",
+    )
+    item = MatchedJob(
+        company_name="Acme",
+        job=ParsedJob(raw=raw),
+        result=MatchResult(profile=ProfileName.TECH, score=0.82, eligible=True, tier="strong"),
+        first_seen_at=datetime(2026, 6, 26, tzinfo=UTC),
+        is_new=True,
+        changed=False,
+    )
+    summary = render_run_summary(
+        run_key="daily-2026-06-26", stats={}, errors=[], matched_jobs=[item], zero_job_sources=[]
+    )
+    assert "NEW " not in summary
+    assert (
+        "\u4f86\u6e90 25 \u5929\u524d\uff5c\u8f03\u65e9\uff08\u672c\u6b21\u65b0\u767c\u73fe\uff09"
+        in summary
+    )
