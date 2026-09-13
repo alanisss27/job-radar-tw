@@ -86,6 +86,11 @@ def run_command(
         False,
         help="Notify eligible existing matches that have not already been sent",
     ),
+    suppress_notifications: bool = typer.Option(
+        False,
+        "--suppress-notifications",
+        help="Re-evaluate backfill jobs without Telegram notifications or summary",
+    ),
     scheduled: bool = typer.Option(
         False,
         help="Use the configured schedule window and daily idempotency key",
@@ -95,6 +100,8 @@ def run_command(
     """Run the monitor and persist results."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     settings, companies, profiles, preferences, candidate = _load(company)
+    if suppress_notifications and not backfill:
+        raise typer.BadParameter("--suppress-notifications requires --backfill")
     if company and not companies[0].enabled:
         raise typer.BadParameter(
             f"{company} is disabled; verify and enable it before a persisted run"
@@ -111,7 +118,9 @@ def run_command(
             )
             _print_report(report)
             raise typer.Exit()
-    if not (settings.telegram_bot_token and settings.telegram_chat_id):
+    if not suppress_notifications and not (
+        settings.telegram_bot_token and settings.telegram_chat_id
+    ):
         raise typer.BadParameter(
             "TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are required for monitor run notifications"
         )
@@ -123,6 +132,7 @@ def run_command(
             preferences,
             candidate,
             backfill=backfill,
+            suppress_notifications=suppress_notifications,
             run_key=run_key,
         )
     )

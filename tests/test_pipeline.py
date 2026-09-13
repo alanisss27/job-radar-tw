@@ -180,6 +180,95 @@ async def test_backfill_strong_matches_respect_notification_cap(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_suppressed_backfill_rechecks_unchanged_jobs_without_telegram(monkeypatch):
+    raw_jobs = [
+        RawJob(
+            source_company="acme",
+            external_job_id="job-unchanged",
+            title="Reporting Analyst",
+            location_raw="Austin, TX",
+            description_raw="Operational reporting",
+            posted_at=datetime(2026, 6, 25, tzinfo=UTC),
+            url="https://example.com/jobs/unchanged",
+        )
+    ]
+    storage = FakeStorage()
+    pending = {
+        "id": "outbox-existing",
+        "job_id": "job-existing",
+        "profile": "growth-analytics",
+        "version_hash": "existing-hash",
+        "score": 0.9,
+        "message": "existing notification",
+    }
+    storage.outbox.append(pending)
+    claim_calls = []
+
+    def tracked_claim(*args, **kwargs):
+        claim_calls.append((args, kwargs))
+        return []
+
+    storage.claim_pending_notifications = tracked_claim
+
+    class FakeSourceRunner:
+        def __init__(self, client, max_concurrency):
+            pass
+
+        async def fetch(self, company):
+            return raw_jobs
+
+    def unexpected_notifier(*args, **kwargs):
+        raise AssertionError("suppressed backfill must not create a Telegram notifier")
+
+    monkeypatch.setattr(pipeline, "Storage", lambda *args, **kwargs: storage)
+    monkeypatch.setattr(pipeline, "SourceRunner", FakeSourceRunner)
+    monkeypatch.setattr(pipeline, "TelegramNotifier", unexpected_notifier)
+
+    settings = Settings(
+        database_url="sqlite:///unused.db",
+        telegram_bot_token=None,
+        telegram_chat_id=None,
+    )
+    company = CompanyConfig(
+        slug="acme",
+        name="Acme",
+        careers_url="https://example.com/jobs",
+        ats_type="jsonld",
+        industry="analytics",
+        profiles=["growth-analytics"],
+        source_verified=True,
+    )
+    profile = ProfileConfig(
+        name="growth-analytics",
+        threshold=0.4,
+        strong_threshold=0.9,
+        weights={"title": 0.6, "location": 0.2, "seniority": 0.2},
+        title_terms=["reporting analyst"],
+        domain_terms=[],
+        skills=[],
+    )
+
+    report = await pipeline.run_pipeline(
+        settings,
+        [company],
+        {profile.name: profile},
+        SearchPreferences(location_terms=["Austin"], include_remote=False),
+        backfill=True,
+        suppress_notifications=True,
+        run_key="suppressed-backfill-test",
+    )
+
+    assert report.matches == 1
+    assert report.immediate_candidates == 0
+    assert report.notifications == 0
+    assert report.notifications_pending == 0
+    assert len(storage.matches) == 1
+    assert storage.notifications == []
+    assert claim_calls == []
+    assert storage.outbox == [pending]
+
+
+@pytest.mark.asyncio
 async def test_partial_baseline_retry_does_not_enqueue_initial_jobs(tmp_path, monkeypatch):
     raw_jobs = [
         RawJob(

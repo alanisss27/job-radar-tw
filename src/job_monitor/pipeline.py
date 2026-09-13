@@ -206,6 +206,7 @@ async def run_pipeline(
     *,
     dry_run: bool = False,
     backfill: bool = False,
+    suppress_notifications: bool = False,
     run_key: str | None = None,
 ) -> RunReport:
     key = run_key or local_run_key(timezone=settings.monitor_timezone)
@@ -235,7 +236,12 @@ async def run_pipeline(
         ) as client:
             runner = SourceRunner(client, settings.max_concurrency)
             notifier = None
-            if settings.telegram_bot_token and settings.telegram_chat_id and not dry_run:
+            if (
+                settings.telegram_bot_token
+                and settings.telegram_chat_id
+                and not dry_run
+                and not suppress_notifications
+            ):
                 notifier = TelegramNotifier(
                     settings.telegram_bot_token, settings.telegram_chat_id, client
                 )
