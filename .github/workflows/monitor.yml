@@ -7,12 +7,21 @@ on:
       timezone: "America/New_York"
   workflow_dispatch:
     inputs:
+      company:
+        description: "Optional company slug"
+        required: false
+        type: string
       run_key:
         description: "Optional idempotency key for a manual run"
         required: false
         type: string
       backfill:
         description: "Notify eligible existing matches that have not been sent"
+        required: false
+        default: false
+        type: boolean
+      suppress_notifications:
+        description: "Suppress Telegram notifications and summary"
         required: false
         default: false
         type: boolean
@@ -94,8 +103,10 @@ jobs:
           IMMEDIATE_NOTIFICATION_MAX_SOURCE_AGE_DAYS: ${{ vars.IMMEDIATE_NOTIFICATION_MAX_SOURCE_AGE_DAYS || '21' }}
           IMMEDIATE_NOTIFICATION_MAX_PER_RUN: ${{ vars.IMMEDIATE_NOTIFICATION_MAX_PER_RUN || '5' }}
           DAILY_SUMMARY_MAX_MATCHES: ${{ vars.DAILY_SUMMARY_MAX_MATCHES || '15' }}
+          INPUT_COMPANY: ${{ inputs.company }}
           INPUT_RUN_KEY: ${{ inputs.run_key }}
           INPUT_BACKFILL: ${{ inputs.backfill }}
+          INPUT_SUPPRESS_NOTIFICATIONS: ${{ inputs.suppress_notifications }}
         run: |
           if [[ -n "${RESUME_TEXT:-}" ]]; then
             resume_file="${RUNNER_TEMP}/resume.md"
@@ -104,6 +115,9 @@ jobs:
             unset RESUME_TEXT
           fi
           args=()
+          if [[ -n "$INPUT_COMPANY" ]]; then
+            args+=(--company "$INPUT_COMPANY")
+          fi
           if [[ -n "$INPUT_RUN_KEY" ]]; then
             args+=(--run-key "$INPUT_RUN_KEY")
           else
@@ -112,10 +126,13 @@ jobs:
           if [[ "$INPUT_BACKFILL" == "true" ]]; then
             args+=(--backfill)
           fi
+          if [[ "$INPUT_SUPPRESS_NOTIFICATIONS" == "true" ]]; then
+            args+=(--suppress-notifications)
+          fi
           timeout --signal=INT --kill-after=30s 45m uv run monitor run "${args[@]}"
 
       - name: Notify Telegram on workflow failure
-        if: failure()
+        if: failure() && inputs.suppress_notifications != true
         shell: bash
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
