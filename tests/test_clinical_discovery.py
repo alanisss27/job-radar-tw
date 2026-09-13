@@ -70,7 +70,6 @@ def test_biotech_sources_are_clinical_discovery_only():
         "artbio": ("lever", {"site": "artbio"}),
         "clinchoice": ("greenhouse", {"board_token": "clinchoice"}),
         "dispatch-bio": ("greenhouse", {"board_token": "dispatchbio"}),
-        "abzena": ("lever", {"site": "abzena"}),
         "genscript": ("greenhouse", {"board_token": "genscript"}),
         "heartflow": ("greenhouse", {"board_token": "heartflowinc"}),
         "syner-g": ("greenhouse", {"board_token": "synerg"}),
@@ -84,6 +83,7 @@ def test_biotech_sources_are_clinical_discovery_only():
         assert company.ats_config == ats_config
 
     assert COMPANIES["komodo-health"].profiles == ["clinical-discovery"]
+    assert not COMPANIES["abzena"].enabled
     assert not COMPANIES["arcellx"].enabled
     assert not COMPANIES["databricks"].enabled
     assert not COMPANIES["nvidia"].enabled
