@@ -74,10 +74,19 @@ def test_biotech_sources_are_clinical_discovery_only():
         "heartflow": ("greenhouse", {"board_token": "heartflowinc"}),
         "syner-g": ("greenhouse", {"board_token": "synerg"}),
         "natera": ("greenhouse", {"board_token": "natera"}),
+        "agc-biologics": (
+            "workday",
+            {
+                "endpoint": "https://agcbio.wd5.myworkdayjobs.com/wday/cxs/agcbio/agcbio_careers/jobs",
+                "site": "agcbio.wd5.myworkdayjobs.com",
+                "detail_base_url": "https://agcbio.wd5.myworkdayjobs.com/en-US/agcbio_careers",
+            },
+        ),
     }
     for slug, (ats_type, ats_config) in expected.items():
         company = COMPANIES[slug]
         assert company.enabled
+        assert company.source_verified
         assert company.profiles == ["clinical-discovery"]
         assert company.ats_type.value == ats_type
         assert company.ats_config == ats_config
@@ -87,6 +96,12 @@ def test_biotech_sources_are_clinical_discovery_only():
     assert not COMPANIES["arcellx"].enabled
     assert not COMPANIES["databricks"].enabled
     assert not COMPANIES["nvidia"].enabled
+    assert sum(
+        company.enabled
+        and company.ats_type.value == "workday"
+        and company.ats_config.get("site") == "agcbio.wd5.myworkdayjobs.com"
+        for company in COMPANIES.values()
+    ) == 1
 
 
 def raw(title, description="", location="Remote"):
