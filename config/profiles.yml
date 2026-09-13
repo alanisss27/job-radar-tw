@@ -22,6 +22,7 @@ profiles:
       - clinical operations
       - research operations
       - operational excellence
+      - project manager
     responsibility_title_exclude_terms:
       - analytics consultant
       - analytics consulting
@@ -86,6 +87,9 @@ profiles:
       - study closeout
       - technology transfer
       - tech transfer
+      - project plans
+      - project budgets
+      - cross-functional coordination
     domain_terms:
       - clinical
       - life sciences

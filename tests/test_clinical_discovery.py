@@ -238,6 +238,52 @@ def test_responsibility_evidence_requires_title_anchor():
     assert result.filtered_reason == "discovery_responsibility_evidence"
 
 
+def test_generic_project_manager_with_life_sciences_evidence_qualifies():
+    result = match(
+        "Project Manager",
+        "Coordinate project plans and track project budgets for GMP biotechnology operations.",
+    )
+
+    assert result.eligible
+    assert result.score >= PROFILE.threshold
+
+
+@pytest.mark.parametrize(
+    "title,description",
+    [
+        (
+            "Project Manager",
+            "Coordinate project plans for GMP biotechnology operations.",
+        ),
+        (
+            "Project Manager",
+            "Coordinate project plans and track project budgets for a general platform.",
+        ),
+        (
+            "IT Project Manager",
+            "Coordinate project plans and track project budgets for software infrastructure.",
+        ),
+        (
+            "Marketing Project Manager",
+            "Coordinate project plans and track project budgets for commercial campaigns.",
+        ),
+    ],
+)
+def test_generic_project_manager_requires_life_sciences_support(title, description):
+    result = match(title, description)
+
+    assert not result.eligible
+    assert result.score == 0
+    assert result.filtered_reason == "discovery_responsibility_evidence"
+
+
+def test_bare_generic_project_manager_does_not_qualify():
+    result = match("Project Manager")
+
+    assert not result.eligible
+    assert result.score < PROFILE.threshold
+
+
 def test_operational_excellence_requires_responsibility_evidence():
     title = "Operational Excellence Project Manager"
 
