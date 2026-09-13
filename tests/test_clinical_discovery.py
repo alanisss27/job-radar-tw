@@ -261,7 +261,7 @@ def test_citizenship_and_clearance_still_override_discovery(requirement):
     assert result.filtered_reason == "citizenship_or_clearance"
 
 
-@pytest.mark.parametrize("location", ["Remote Canada", "Boston, MA", "Basel", ""])
+@pytest.mark.parametrize("location", ["Boston, MA", "Basel", ""])
 def test_location_remains_broad(location):
     assert match("Clinical Project Manager", location=location).eligible
 

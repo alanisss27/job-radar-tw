@@ -18,6 +18,31 @@ from .models import (
 from .resume import SKILL_ALIASES
 
 REMOTE_TERMS = ["remote", "united states - remote", "remote us", "remote, us"]
+# Explicit foreign location markers are rejected, while an unqualified
+# ``Remote``/``Home-based`` location remains eligible for broad discovery.
+FOREIGN_LOCATION_TERMS = [
+    "australia",
+    "canada",
+    "serbia",
+    "singapore",
+    "south korea",
+    "taiwan",
+    "united kingdom",
+    "uk",
+    "england",
+    "spain",
+    "poland",
+    "hungary",
+    "romania",
+    "slovakia",
+    "europe",
+    "emea",
+    "apac",
+    "asia pacific",
+    "latin america",
+    "latam",
+]
+US_LOCATION_TERMS = ["united states", "united states of america", "u.s.", "us"]
 VISA_SUPPORT_TERMS = [
     "will sponsor",
     "visa sponsorship is available",
@@ -256,6 +281,12 @@ def parse_job(raw: RawJob) -> ParsedJob:
 
 
 def location_eligible(job: ParsedJob, preferences: SearchPreferences) -> bool:
+    location = job.raw.location_raw.strip()
+    location_lower = location.casefold()
+    foreign_hits = _discovery_hits(location_lower, FOREIGN_LOCATION_TERMS)
+    us_evidence = _discovery_hits(location_lower, US_LOCATION_TERMS)
+    if foreign_hits and not us_evidence:
+        return False
     if job.remote_type == RemoteType.REMOTE:
         return preferences.include_remote
     if not preferences.location_terms:

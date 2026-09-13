@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from job_monitor.config import SearchPreferences, load_profiles
 from job_monitor.matching import match_job, parse_job
 from job_monitor.models import ProfileName, RawJob, Seniority, VisaSupport
@@ -183,6 +185,60 @@ def test_remote_preference_can_include_or_exclude_remote_jobs():
     assert match_job(parsed, PROFILES[ProfileName.HEALTHCARE], included).eligible
     assert (
         match_job(parsed, PROFILES[ProfileName.HEALTHCARE], excluded).filtered_reason == "location"
+    )
+
+
+@pytest.mark.parametrize(
+    "location",
+    [
+        "Remote, United States",
+        "Remote, US",
+        "Remote",
+        "Home-based",
+        "Tampa, FL",
+        "Seattle, WA",
+        "Remote, North America",
+        "Remote, Americas",
+        "Remote, Eastern Time",
+        "Remote, EST",
+        "Remote, Multiple Locations",
+        "Remote, Worldwide",
+        "Remote, Global",
+        "Remote, US or Canada",
+        "Remote, United States or Canada",
+        "Remote, New York, NY",
+        "Home-based, US",
+        "Home-based, North America",
+    ],
+)
+def test_explicit_us_and_ambiguous_remote_locations_are_allowed(location):
+    preferences = SearchPreferences(location_terms=[], include_remote=True)
+    parsed = parse_job(job(location=location, description="Healthcare analytics using SQL."))
+    assert (
+        match_job(parsed, PROFILES[ProfileName.HEALTHCARE], preferences).filtered_reason
+        != "location"
+    )
+
+
+@pytest.mark.parametrize(
+    "location",
+    [
+        "Remote, United Kingdom",
+        "Remote, Australia",
+        "Remote, Taiwan",
+        "Remote, Canada",
+        "London, United Kingdom",
+        "Toronto, Canada",
+        "Remote, Singapore",
+        "Remote, South Korea",
+    ],
+)
+def test_explicit_foreign_locations_are_filtered(location):
+    preferences = SearchPreferences(location_terms=[], include_remote=True)
+    parsed = parse_job(job(location=location, description="Healthcare analytics using SQL."))
+    assert (
+        match_job(parsed, PROFILES[ProfileName.HEALTHCARE], preferences).filtered_reason
+        == "location"
     )
 
 
