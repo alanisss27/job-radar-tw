@@ -70,6 +70,11 @@ def test_biotech_sources_are_clinical_discovery_only():
         "artbio": ("lever", {"site": "artbio"}),
         "clinchoice": ("greenhouse", {"board_token": "clinchoice"}),
         "dispatch-bio": ("greenhouse", {"board_token": "dispatchbio"}),
+        "abzena": ("lever", {"site": "abzena"}),
+        "genscript": ("greenhouse", {"board_token": "genscript"}),
+        "heartflow": ("greenhouse", {"board_token": "heartflowinc"}),
+        "syner-g": ("greenhouse", {"board_token": "synerg"}),
+        "natera": ("greenhouse", {"board_token": "natera"}),
     }
     for slug, (ats_type, ats_config) in expected.items():
         company = COMPANIES[slug]
@@ -390,6 +395,11 @@ def test_discovery_configuration_and_company_scope():
         "artbio",
         "clinchoice",
         "dispatch-bio",
+        "abzena",
+        "genscript",
+        "heartflow",
+        "syner-g",
+        "natera",
     }
     assert COMPANIES["nvidia"].ats_config["search_texts"] == [
         "data",

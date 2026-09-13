@@ -63,6 +63,10 @@ def company(ats_type, ats_config):
         "eikontherapeutics",
         "clinchoice",
         "dispatchbio",
+        "genscript",
+        "heartflowinc",
+        "synerg",
+        "natera",
     ],
 )
 @respx.mock
@@ -136,6 +140,7 @@ async def test_lightship_lever_adapter():
         "protrials",
         "wepclinical",
         "artbio",
+        "abzena",
     ],
 )
 @respx.mock
