@@ -66,6 +66,11 @@ def test_biotech_sources_are_clinical_discovery_only():
         "alumis": ("greenhouse", {"board_token": "alumis"}),
         "revolution-medicines": ("greenhouse", {"board_token": "revolutionmedicines"}),
         "wep-clinical": ("lever", {"site": "wepclinical"}),
+        "lakefront-biotherapeutics": ("greenhouse", {"board_token": "lakefrontbiotherapeuticsinc"}),
+        "eikon-therapeutics": ("greenhouse", {"board_token": "eikontherapeutics"}),
+        "artbio": ("lever", {"site": "artbio"}),
+        "clinchoice": ("greenhouse", {"board_token": "clinchoice"}),
+        "dispatch-bio": ("greenhouse", {"board_token": "dispatchbio"}),
     }
     for slug, (ats_type, ats_config) in expected.items():
         company = COMPANIES[slug]
@@ -380,6 +385,11 @@ def test_discovery_configuration_and_company_scope():
         "alumis",
         "revolution-medicines",
         "wep-clinical",
+        "lakefront-biotherapeutics",
+        "eikon-therapeutics",
+        "artbio",
+        "clinchoice",
+        "dispatch-bio",
     }
     assert COMPANIES["nvidia"].ats_config["search_texts"] == [
         "data",

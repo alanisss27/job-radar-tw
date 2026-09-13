@@ -59,6 +59,10 @@ def company(ats_type, ats_config):
         "vaxcyte",
         "alumis",
         "revolutionmedicines",
+        "lakefrontbiotherapeuticsinc",
+        "eikontherapeutics",
+        "clinchoice",
+        "dispatchbio",
     ],
 )
 @respx.mock
@@ -131,6 +135,7 @@ async def test_lightship_lever_adapter():
         "endpointclinical",
         "protrials",
         "wepclinical",
+        "artbio",
     ],
 )
 @respx.mock
