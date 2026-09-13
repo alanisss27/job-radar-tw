@@ -47,6 +47,18 @@ def test_biotech_sources_are_clinical_discovery_only():
         "precision-for-medicine": ("greenhouse", {"board_token": "pfm"}),
         "iterative-health": ("greenhouse", {"board_token": "iterativehealth"}),
         "maze-therapeutics": ("greenhouse", {"board_token": "mazetherapeutics"}),
+        "oruka-therapeutics": ("greenhouse", {"board_token": "oruka"}),
+        "janux-therapeutics": ("lever", {"site": "januxrx"}),
+        "anteris-technologies": ("greenhouse", {"board_token": "anteristech"}),
+        "immunome": ("greenhouse", {"board_token": "immunomeinc"}),
+        "alimentiv": ("lever", {"site": "alimentiv-2"}),
+        "scholar-rock": ("lever", {"site": "scholarrock"}),
+        "mineralys-therapeutics": ("greenhouse", {"board_token": "mineralystherapeutics"}),
+        "kura-oncology": ("greenhouse", {"board_token": "kuraoncology"}),
+        "tango-therapeutics": ("greenhouse", {"board_token": "tangotherapeutics"}),
+        "arcellx": ("greenhouse", {"board_token": "arcellx"}),
+        "kymera-therapeutics": ("greenhouse", {"board_token": "KymeraTherapeutics"}),
+        "cullinan-therapeutics": ("lever", {"site": "cullinanoncology"}),
     }
     for slug, (ats_type, ats_config) in expected.items():
         company = COMPANIES[slug]
@@ -342,6 +354,18 @@ def test_discovery_configuration_and_company_scope():
         "precision-for-medicine",
         "iterative-health",
         "maze-therapeutics",
+        "oruka-therapeutics",
+        "janux-therapeutics",
+        "anteris-technologies",
+        "immunome",
+        "alimentiv",
+        "scholar-rock",
+        "mineralys-therapeutics",
+        "kura-oncology",
+        "tango-therapeutics",
+        "arcellx",
+        "kymera-therapeutics",
+        "cullinan-therapeutics",
     }
     assert COMPANIES["nvidia"].ats_config["search_texts"] == [
         "data",
