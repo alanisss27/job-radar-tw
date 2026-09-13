@@ -80,6 +80,7 @@ def test_biotech_sources_are_clinical_discovery_only():
                 "endpoint": "https://agcbio.wd5.myworkdayjobs.com/wday/cxs/agcbio/agcbio_careers/jobs",
                 "site": "agcbio.wd5.myworkdayjobs.com",
                 "detail_base_url": "https://agcbio.wd5.myworkdayjobs.com/en-US/agcbio_careers",
+                "detail_api_base": "https://agcbio.wd5.myworkdayjobs.com/wday/cxs/agcbio/agcbio_careers",
             },
         ),
     }

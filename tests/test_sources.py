@@ -245,6 +245,56 @@ async def test_workday_searches_and_deduplicates():
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_workday_detail_api_replaces_listing_description():
+    endpoint = "https://acme.wd1.myworkdayjobs.com/wday/cxs/acme/External/jobs"
+    external_path = "/job/Bothell-Washington-USA/Project-Manager_JR103037"
+    detail_api_base = "https://acme.wd1.myworkdayjobs.com/wday/cxs/acme/External"
+    respx.post(endpoint).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "total": 1,
+                "jobPostings": [
+                    {
+                        "title": "Project Manager",
+                        "externalPath": external_path,
+                        "locationsText": "Bothell, Washington, USA",
+                        "bulletFields": ["JR103037"],
+                    }
+                ],
+            },
+        )
+    )
+    respx.get(detail_api_base + external_path).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "jobPostingInfo": {
+                    "jobDescription": "<p>Full CMC GMP project description</p>"
+                }
+            },
+        )
+    )
+    cfg = company(
+        "workday",
+        {
+            "endpoint": endpoint,
+            "site": "acme.wd1.myworkdayjobs.com",
+            "detail_base_url": "https://acme.wd1.myworkdayjobs.com/en-US/External",
+            "detail_api_base": detail_api_base,
+        },
+    )
+
+    async with httpx.AsyncClient() as client:
+        rows = await WorkdaySource(cfg, client).fetch()
+
+    assert len(rows) == 1
+    assert rows[0].external_job_id == external_path
+    assert rows[0].description_raw == "Full CMC GMP project description"
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_workday_skips_posting_missing_title(caplog):
     endpoint = "https://acme.wd1.myworkdayjobs.com/wday/cxs/acme/External/jobs"
     respx.post(endpoint).mock(
