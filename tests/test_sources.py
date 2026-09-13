@@ -55,6 +55,10 @@ def company(ats_type, ats_config):
         "tangotherapeutics",
         "arcellx",
         "KymeraTherapeutics",
+        "kincellbio",
+        "vaxcyte",
+        "alumis",
+        "revolutionmedicines",
     ],
 )
 @respx.mock
@@ -117,7 +121,18 @@ async def test_lightship_lever_adapter():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("site", ["januxrx", "alimentiv-2", "scholarrock", "cullinanoncology"])
+@pytest.mark.parametrize(
+    "site",
+    [
+        "januxrx",
+        "alimentiv-2",
+        "scholarrock",
+        "cullinanoncology",
+        "endpointclinical",
+        "protrials",
+        "wepclinical",
+    ],
+)
 @respx.mock
 async def test_fourth_expansion_lever_adapters(site):
     respx.get(f"https://api.lever.co/v0/postings/{site}?mode=json").mock(

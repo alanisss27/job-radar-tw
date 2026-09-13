@@ -59,6 +59,13 @@ def test_biotech_sources_are_clinical_discovery_only():
         "arcellx": ("greenhouse", {"board_token": "arcellx"}),
         "kymera-therapeutics": ("greenhouse", {"board_token": "KymeraTherapeutics"}),
         "cullinan-therapeutics": ("lever", {"site": "cullinanoncology"}),
+        "endpoint-clinical": ("lever", {"site": "endpointclinical"}),
+        "protrials-research": ("lever", {"site": "protrials"}),
+        "kincell-bio": ("greenhouse", {"board_token": "kincellbio"}),
+        "vaxcyte": ("greenhouse", {"board_token": "vaxcyte"}),
+        "alumis": ("greenhouse", {"board_token": "alumis"}),
+        "revolution-medicines": ("greenhouse", {"board_token": "revolutionmedicines"}),
+        "wep-clinical": ("lever", {"site": "wepclinical"}),
     }
     for slug, (ats_type, ats_config) in expected.items():
         company = COMPANIES[slug]
@@ -366,6 +373,13 @@ def test_discovery_configuration_and_company_scope():
         "arcellx",
         "kymera-therapeutics",
         "cullinan-therapeutics",
+        "endpoint-clinical",
+        "protrials-research",
+        "kincell-bio",
+        "vaxcyte",
+        "alumis",
+        "revolution-medicines",
+        "wep-clinical",
     }
     assert COMPANIES["nvidia"].ats_config["search_texts"] == [
         "data",
