@@ -98,12 +98,15 @@ def test_biotech_sources_are_clinical_discovery_only():
     assert not COMPANIES["arcellx"].enabled
     assert not COMPANIES["databricks"].enabled
     assert not COMPANIES["nvidia"].enabled
-    assert sum(
-        company.enabled
-        and company.ats_type.value == "workday"
-        and company.ats_config.get("site") == "agcbio.wd5.myworkdayjobs.com"
-        for company in COMPANIES.values()
-    ) == 1
+    assert (
+        sum(
+            company.enabled
+            and company.ats_type.value == "workday"
+            and company.ats_config.get("site") == "agcbio.wd5.myworkdayjobs.com"
+            for company in COMPANIES.values()
+        )
+        == 1
+    )
 
 
 def raw(title, description="", location="Remote"):

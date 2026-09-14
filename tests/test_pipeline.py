@@ -73,7 +73,7 @@ class FakeStorage:
         return [dict(item, claim_token=f"claim-{item['id']}") for item in claimed]
 
     def notification_claim_is_valid(self, run_id, outbox_id, claim_token):
-        return any(item['id'] == outbox_id for item in self.outbox)
+        return any(item["id"] == outbox_id for item in self.outbox)
 
     def release_notification_claim(self, run_id, outbox_id, claim_token, error):
         return True

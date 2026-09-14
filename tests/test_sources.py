@@ -418,11 +418,7 @@ async def test_workday_detail_api_replaces_listing_description():
     respx.get(detail_api_base + external_path).mock(
         return_value=httpx.Response(
             200,
-            json={
-                "jobPostingInfo": {
-                    "jobDescription": "<p>Full CMC GMP project description</p>"
-                }
-            },
+            json={"jobPostingInfo": {"jobDescription": "<p>Full CMC GMP project description</p>"}},
         )
     )
     cfg = company(
