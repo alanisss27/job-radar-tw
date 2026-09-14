@@ -74,6 +74,7 @@ def test_biotech_sources_are_clinical_discovery_only():
         "heartflow": ("greenhouse", {"board_token": "heartflowinc"}),
         "syner-g": ("greenhouse", {"board_token": "synerg"}),
         "natera": ("greenhouse", {"board_token": "natera"}),
+        "psi-cro": ("smartrecruiters", {"company_identifier": "PSICRO"}),
         "agc-biologics": (
             "workday",
             {
@@ -484,6 +485,7 @@ def test_discovery_configuration_and_company_scope():
         "natera",
         "agc-biologics",
         "worldwide-clinical-trials",
+        "psi-cro",
     }
     assert COMPANIES["nvidia"].ats_config["search_texts"] == [
         "data",

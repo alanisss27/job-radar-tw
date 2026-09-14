@@ -191,7 +191,7 @@ async def test_smartrecruiters_pagination():
                         "id": "s",
                         "name": "BI Analyst",
                         "location": {"city": "Dallas", "region": "TX"},
-                        "ref": "https://jobs.smartrecruiters.com/acme/s",
+                        "ref": "https://api.smartrecruiters.com/v1/companies/acme/postings/s",
                     }
                 ],
             },
@@ -210,6 +210,7 @@ async def test_smartrecruiters_pagination():
     assert len(rows) == 1
     assert "Dallas" in rows[0].location_raw
     assert rows[0].description_raw == "SQL"
+    assert str(rows[0].url) == "https://jobs.smartrecruiters.com/acme/s"
 
 
 @pytest.mark.asyncio

@@ -260,8 +260,7 @@ class SmartRecruitersSource(JobSource):
                     ),
                     description_raw=description,
                     posted_at=_parse_datetime(item.get("releasedDate")),
-                    url=item.get("ref")
-                    or f"https://jobs.smartrecruiters.com/{identifier}/{item_id}",
+                    url=f"https://jobs.smartrecruiters.com/{identifier}/{item_id}",
                 )
             offset += len(content)
             if not content or offset >= int(payload.get("totalFound", offset)):
