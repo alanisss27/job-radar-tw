@@ -217,6 +217,26 @@ def _handoff_order(item: Mapping[str, Any]) -> tuple[float, str, str]:
     return (-float(item["score"]), str(item["company_slug"]), str(item["job_id"]))
 
 
+def _current_eligible_match():
+    return and_(
+        match_results.c.job_id == jobs.c.id,
+        match_results.c.content_hash == jobs.c.content_hash,
+        match_results.c.eligible.is_(True),
+    )
+
+
+def _valid_pending_match():
+    return exists(
+        select(match_results.c.id)
+        .where(
+            _current_eligible_match(),
+            match_results.c.profile == notification_outbox.c.profile,
+            match_results.c.content_hash == notification_outbox.c.version_hash,
+        )
+        .correlate(jobs, notification_outbox)
+    )
+
+
 def normalize_database_url(url: str) -> str:
     if url.startswith("postgresql://"):
         return "postgresql+psycopg://" + url.removeprefix("postgresql://")
@@ -767,6 +787,23 @@ class Storage:
     ) -> list[JobPersistResult]:
         if not items:
             return []
+        decision_keys = [
+            (raw.stable_external_id, str(decision.result.profile))
+            for raw, _, decisions in items
+            for decision in decisions
+        ]
+        external_ids = [raw.stable_external_id for raw, _, _ in items]
+        # Repeated jobs/decisions must also reconcile their outbox in input order.
+        # Keep the ordinary unique-job path bulked, as before.
+        if (
+            decision_keys
+            and len(set(external_ids)) != len(external_ids)
+            or len(set(decision_keys)) != len(decision_keys)
+        ):
+            return [
+                self.persist_job_decisions(company_id, run_id, raw, plan, decisions)
+                for raw, plan, decisions in items
+            ]
         results: list[JobPersistResult | None] = [None] * len(items)
         fallback: list[int] = []
         now = datetime.now(UTC)
@@ -955,56 +992,14 @@ class Storage:
                     for index, raw, plan, decisions in valid_locked
                     for decision in decisions
                 ]
-                existing_match_keys: set[tuple[str, str, str, str]] = set()
-                if match_entries:
-                    match_job_ids = [plan.job_id for _, _, plan, _ in match_entries]
-                    match_hashes = [raw.content_hash for _, raw, _, _ in match_entries]
-                    existing_match_keys = {
-                        (
-                            row["job_id"],
-                            row["profile"],
-                            row["profile_version"],
-                            row["content_hash"],
-                        )
-                        for row in conn.execute(
-                            select(
-                                match_results.c.job_id,
-                                match_results.c.profile,
-                                match_results.c.profile_version,
-                                match_results.c.content_hash,
-                            ).where(
-                                match_results.c.job_id.in_(match_job_ids),
-                                match_results.c.content_hash.in_(match_hashes),
-                            )
-                        ).mappings()
-                    }
-                    match_values = []
-                    for _, raw, plan, decision in match_entries:
-                        key = (
-                            plan.job_id,
-                            str(decision.result.profile),
-                            decision.profile_version,
-                            raw.content_hash,
-                        )
-                        if key in existing_match_keys:
-                            continue
-                        existing_match_keys.add(key)
-                        match_values.append(
-                            {
-                                "id": str(uuid.uuid4()),
-                                "job_id": plan.job_id,
-                                "profile": str(decision.result.profile),
-                                "profile_version": decision.profile_version,
-                                "content_hash": raw.content_hash,
-                                "score": decision.result.score,
-                                "eligible": decision.result.eligible,
-                                "tier": decision.result.tier,
-                                "details": decision.result.model_dump(mode="json"),
-                                "created_at": now,
-                            }
-                        )
-                    if match_values:
-                        conn.execute(insert(match_results), match_values)
+                self._record_matches(
+                    conn,
+                    [
+                        (plan.job_id, decision.profile_version, raw.content_hash, decision.result)
+                        for _, raw, plan, decision in match_entries
+                    ],
+                    now,
+                )
 
                 notification_entries = [
                     (index, raw, plan, decision)
@@ -1154,6 +1149,9 @@ class Storage:
         self, job_id: str, profile_version: str, content_hash: str, result: MatchResult
     ) -> None:
         with self.engine.begin() as conn:
+            conn.execute(
+                select(jobs.c.id).where(jobs.c.id == job_id).with_for_update()
+            ).scalar_one()
             self._record_match(
                 conn,
                 job_id,
@@ -1172,29 +1170,91 @@ class Storage:
         result: MatchResult,
         created_at: datetime,
     ) -> None:
-        match_exists = conn.execute(
-            select(match_results.c.id).where(
-                match_results.c.job_id == job_id,
-                match_results.c.profile == str(result.profile),
-                match_results.c.profile_version == profile_version,
-                match_results.c.content_hash == content_hash,
-            )
-        ).scalar_one_or_none()
-        if match_exists is None:
+        Storage._record_matches(conn, [(job_id, profile_version, content_hash, result)], created_at)
+
+    @staticmethod
+    def _record_matches(
+        conn,
+        entries: list[tuple[str, str, str, MatchResult]],
+        created_at: datetime,
+    ) -> None:
+        """Replace explicit evaluations; callers hold the corresponding job locks.
+
+        Other content hashes remain historical. Other profile versions for the same
+        content are superseded, so readers need no timestamp/version ordering.
+        Each job/profile/content tuple occurs at most once in entries; repeated
+        decisions are handled sequentially by the single-job path.
+        """
+        if not entries:
+            return
+        rows = (
             conn.execute(
-                insert(match_results).values(
-                    id=str(uuid.uuid4()),
-                    job_id=job_id,
-                    profile=str(result.profile),
-                    profile_version=profile_version,
-                    content_hash=content_hash,
-                    score=result.score,
-                    eligible=result.eligible,
-                    tier=result.tier,
-                    details=result.model_dump(mode="json"),
-                    created_at=created_at,
+                select(match_results).where(
+                    match_results.c.job_id.in_([entry[0] for entry in entries]),
+                    match_results.c.content_hash.in_([entry[2] for entry in entries]),
                 )
             )
+            .mappings()
+            .all()
+        )
+        by_tuple = {}
+        for row in rows:
+            by_tuple.setdefault((row["job_id"], row["profile"], row["content_hash"]), []).append(
+                row
+            )
+        inserts, updates, removed, cancelled = [], [], [], []
+        for job_id, version, content_hash, result in entries:
+            profile = str(result.profile)
+            prior = by_tuple.get((job_id, profile, content_hash), [])
+            exact = next((row for row in prior if row["profile_version"] == version), None)
+            values = dict(
+                score=result.score,
+                eligible=result.eligible,
+                tier=result.tier,
+                details=result.model_dump(mode="json"),
+            )
+            changed = (
+                len(prior) != 1
+                or exact is None
+                or any(exact[key] != value for key, value in values.items())
+            )
+            if not result.eligible or changed:
+                cancelled.append(
+                    and_(
+                        notification_outbox.c.job_id == job_id,
+                        notification_outbox.c.profile == profile,
+                    )
+                )
+            removed.extend(row["id"] for row in prior if row["profile_version"] != version)
+            if exact is None:
+                inserts.append(
+                    dict(
+                        id=str(uuid.uuid4()),
+                        job_id=job_id,
+                        profile=profile,
+                        profile_version=version,
+                        content_hash=content_hash,
+                        created_at=created_at,
+                        **values,
+                    )
+                )
+            else:
+                updates.append(dict(_match_id=exact["id"], **values))
+        if cancelled:
+            conn.execute(delete(notification_outbox).where(or_(*cancelled)))
+        if removed:
+            conn.execute(delete(match_results).where(match_results.c.id.in_(removed)))
+        if updates:
+            conn.execute(
+                update(match_results)
+                .where(match_results.c.id == bindparam("_match_id"))
+                .values(
+                    **{key: bindparam(key) for key in ("score", "eligible", "tier", "details")}
+                ),
+                updates,
+            )
+        if inserts:
+            conn.execute(insert(match_results), inserts)
 
     def was_notified(self, job_id: str, profile: str, version_hash: str) -> bool:
         with self.engine.connect() as conn:
@@ -1287,6 +1347,7 @@ class Storage:
                         notification_outbox.c.claim_token.is_(None),
                         jobs.c.status == "active",
                         jobs.c.content_hash == notification_outbox.c.version_hash,
+                        _valid_pending_match(),
                     )
                     .order_by(
                         notification_outbox.c.score.desc(),
@@ -1317,6 +1378,7 @@ class Storage:
                     jobs.c.id == notification_outbox.c.job_id,
                     jobs.c.status == "active",
                     jobs.c.content_hash == notification_outbox.c.version_hash,
+                    _valid_pending_match(),
                 )
             )
             conn.execute(delete(notification_outbox).where(~current_job))
@@ -1355,6 +1417,7 @@ class Storage:
                         ),
                         jobs.c.status == "active",
                         jobs.c.content_hash == notification_outbox.c.version_hash,
+                        _valid_pending_match(),
                     )
                     .order_by(
                         notification_outbox.c.score.desc(),
@@ -1393,6 +1456,25 @@ class Storage:
                     claimed.append(item)
             return claimed
 
+    def notification_claim_is_valid(self, run_id: str, outbox_id: str, claim_token: str) -> bool:
+        """Recheck a claim immediately before sending an in-memory queued message."""
+        with self.engine.connect() as conn:
+            return (
+                conn.execute(
+                    select(notification_outbox.c.id)
+                    .join(jobs, jobs.c.id == notification_outbox.c.job_id)
+                    .where(
+                        notification_outbox.c.id == outbox_id,
+                        notification_outbox.c.claimed_by_run_id == run_id,
+                        notification_outbox.c.claim_token == claim_token,
+                        jobs.c.status == "active",
+                        jobs.c.content_hash == notification_outbox.c.version_hash,
+                        _valid_pending_match(),
+                    )
+                ).scalar_one_or_none()
+                is not None
+            )
+
     def pending_notification_count(self) -> int:
         with self.engine.connect() as conn:
             return int(
@@ -1407,6 +1489,7 @@ class Storage:
                     .where(
                         jobs.c.status == "active",
                         jobs.c.content_hash == notification_outbox.c.version_hash,
+                        _valid_pending_match(),
                     )
                 ).scalar_one()
             )
@@ -1668,11 +1751,7 @@ class Storage:
                 jobs.join(companies, companies.c.id == jobs.c.company_id)
                 .join(
                     match_results,
-                    and_(
-                        match_results.c.job_id == jobs.c.id,
-                        match_results.c.content_hash == jobs.c.content_hash,
-                        match_results.c.eligible.is_(True),
-                    ),
+                    _current_eligible_match(),
                 )
                 .outerjoin(applications, applications.c.job_id == jobs.c.id)
             )
@@ -1726,7 +1805,7 @@ class Storage:
         days = max(1, min(days, 365))
         now = datetime.now(UTC)
         since = now - timedelta(days=days)
-        active_match = match_results.c.eligible.is_(True)
+        active_match = _current_eligible_match()
 
         with self.engine.connect() as conn:
             recommended = conn.execute(
@@ -1859,7 +1938,8 @@ class Storage:
                 match_results.c.job_id.label("job_id"),
                 func.max(match_results.c.score).label("score"),
             )
-            .where(match_results.c.eligible.is_(True))
+            .select_from(match_results.join(jobs, match_results.c.job_id == jobs.c.id))
+            .where(_current_eligible_match())
             .group_by(match_results.c.job_id)
             .subquery()
         )

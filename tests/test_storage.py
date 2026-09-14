@@ -244,6 +244,7 @@ def test_notification_outbox_survives_until_delivery_is_recorded(tmp_path):
     run_id = db.start_run("run")
     job_id, *_ = db.upsert_job(company_id, run_id, raw())
 
+    db.record_match(job_id, "1", raw().content_hash, match_decisions()[0].result)
     assert db.queue_notification(job_id, "tech", raw().content_hash, 0.84, "message")
     assert not db.queue_notification(job_id, "tech", raw().content_hash, 0.84, "message")
     assert db.pending_notification_count() == 1
@@ -278,6 +279,7 @@ def test_next_run_recovers_outbox_claim_abandoned_by_failed_run(tmp_path):
     first_run = db.start_run("run-1")
     assert first_run
     job_id, *_ = db.upsert_job(company_id, first_run, raw())
+    db.record_match(job_id, "1", raw().content_hash, match_decisions()[0].result)
     assert db.queue_notification(job_id, "tech", raw().content_hash, 0.84, "message")
     abandoned = db.claim_pending_notifications(first_run, 1)
     assert len(abandoned) == 1
@@ -335,6 +337,7 @@ def test_content_change_removes_superseded_pending_notification(tmp_path):
     first_run = db.start_run("run-1")
     assert first_run
     job_id, *_ = db.upsert_job(company_id, first_run, raw("SQL"))
+    db.record_match(job_id, "1", raw().content_hash, match_decisions()[0].result)
     assert db.queue_notification(job_id, "tech", raw("SQL").content_hash, 0.84, "old")
 
     second_run = db.start_run("run-2")
@@ -353,6 +356,7 @@ def test_closing_job_removes_pending_notification(tmp_path):
     first_run = db.start_run("run-1")
     assert first_run
     job_id, *_ = db.upsert_job(company_id, first_run, raw())
+    db.record_match(job_id, "1", raw().content_hash, match_decisions()[0].result)
     assert db.queue_notification(job_id, "tech", raw().content_hash, 0.84, "message")
 
     second_run = db.start_run("run-2")

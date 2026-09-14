@@ -465,6 +465,10 @@ async def run_pipeline(
                     pending_before_delivery - len(queued),
                 )
                 for item in queued:
+                    if not storage.notification_claim_is_valid(
+                        run_id, item["id"], item["claim_token"]
+                    ):
+                        continue
                     sent = await _try_send_notification(
                         notifier,
                         item["message"],
