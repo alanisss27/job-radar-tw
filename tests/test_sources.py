@@ -413,6 +413,157 @@ async def test_workday_detail_api_replaces_listing_description():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("listing_location", "detail_location", "additional", "country", "code"),
+    [
+        (
+            "2 Locations",
+            "England, United Kingdom",
+            ["Madrid, Spain"],
+            "United Kingdom",
+            "GB",
+        ),
+        (
+            "4 Locations",
+            "Durham, North Carolina",
+            ["Ontario, Canada", "Quebec, Canada"],
+            "United States of America",
+            "US",
+        ),
+    ],
+)
+@respx.mock
+async def test_workday_detail_api_enriches_location(
+    listing_location, detail_location, additional, country, code
+):
+    endpoint = "https://acme.wd1.myworkdayjobs.com/wday/cxs/acme/External/jobs"
+    external_path = "/job/detail/Project-Manager_R1"
+    detail_api_base = "https://acme.wd1.myworkdayjobs.com/wday/cxs/acme/External"
+    respx.post(endpoint).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "total": 1,
+                "jobPostings": [
+                    {
+                        "title": "Project Manager",
+                        "externalPath": external_path,
+                        "locationsText": listing_location,
+                    }
+                ],
+            },
+        )
+    )
+    respx.get(detail_api_base + external_path).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "jobPostingInfo": {
+                    "location": detail_location,
+                    "additionalLocations": additional,
+                    "country": {"descriptor": country},
+                    "jobRequisitionLocation": {"country": {"alpha2Code": code}},
+                }
+            },
+        )
+    )
+    cfg = company(
+        "workday",
+        {
+            "endpoint": endpoint,
+            "site": "acme.wd1.myworkdayjobs.com",
+            "detail_base_url": "https://acme.wd1.myworkdayjobs.com/en-US/External",
+            "detail_api_base": detail_api_base,
+        },
+    )
+
+    async with httpx.AsyncClient() as client:
+        rows = await WorkdaySource(cfg, client).fetch()
+
+    assert listing_location in rows[0].location_raw
+    assert detail_location in rows[0].location_raw
+    assert all(location in rows[0].location_raw for location in additional)
+    assert country in rows[0].location_raw
+    assert code in rows[0].location_raw
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_workday_without_detail_api_preserves_listing_location():
+    endpoint = "https://acme.wd1.myworkdayjobs.com/wday/cxs/acme/External/jobs"
+    listing_location = "2 Locations"
+    respx.post(endpoint).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "total": 1,
+                "jobPostings": [
+                    {
+                        "title": "Project Manager",
+                        "externalPath": "/job/detail/Project-Manager_R1",
+                        "locationsText": listing_location,
+                    }
+                ],
+            },
+        )
+    )
+    cfg = company(
+        "workday",
+        {
+            "endpoint": endpoint,
+            "site": "acme.wd1.myworkdayjobs.com",
+            "detail_base_url": "https://acme.wd1.myworkdayjobs.com/en-US/External",
+        },
+    )
+
+    async with httpx.AsyncClient() as client:
+        rows = await WorkdaySource(cfg, client).fetch()
+
+    assert rows[0].location_raw == listing_location
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_workday_detail_api_failure_preserves_listing_location(caplog):
+    endpoint = "https://acme.wd1.myworkdayjobs.com/wday/cxs/acme/External/jobs"
+    external_path = "/job/detail/Project-Manager_R1"
+    detail_api_base = "https://acme.wd1.myworkdayjobs.com/wday/cxs/acme/External"
+    respx.post(endpoint).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "total": 1,
+                "jobPostings": [
+                    {
+                        "title": "Project Manager",
+                        "externalPath": external_path,
+                        "locationsText": "2 Locations",
+                        "bulletFields": ["Listing fallback"],
+                    }
+                ],
+            },
+        )
+    )
+    respx.get(detail_api_base + external_path).mock(return_value=httpx.Response(503))
+    cfg = company(
+        "workday",
+        {
+            "endpoint": endpoint,
+            "site": "acme.wd1.myworkdayjobs.com",
+            "detail_base_url": "https://acme.wd1.myworkdayjobs.com/en-US/External",
+            "detail_api_base": detail_api_base,
+        },
+    )
+
+    async with httpx.AsyncClient() as client:
+        rows = await WorkdaySource(cfg, client).fetch()
+
+    assert rows[0].location_raw == "2 Locations"
+    assert rows[0].description_raw == "Listing fallback"
+    assert "using listing fields" in caplog.text
+
+
+@pytest.mark.asyncio
 @respx.mock
 async def test_workday_skips_posting_missing_title(caplog):
     endpoint = "https://acme.wd1.myworkdayjobs.com/wday/cxs/acme/External/jobs"

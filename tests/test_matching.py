@@ -114,6 +114,35 @@ def test_non_us_remote_location_is_filtered():
     assert result.filtered_reason == "location"
 
 
+def test_workday_enriched_foreign_only_location_is_filtered():
+    preferences = SearchPreferences(location_terms=[], include_remote=True)
+    parsed = parse_job(
+        job(
+            title="Project Manager",
+            location="2 Locations; England, United Kingdom; Madrid, Spain; United Kingdom; GB",
+            description="Clinical trial work to manage projects and project timelines.",
+        )
+    )
+    result = match_job(parsed, PROFILES["clinical-discovery"], preferences)
+    assert result.filtered_reason == "location"
+
+
+def test_workday_enriched_us_canada_location_remains_eligible():
+    preferences = SearchPreferences(location_terms=[], include_remote=True)
+    parsed = parse_job(
+        job(
+            title="Project Manager",
+            location=(
+                "4 Locations; Durham, North Carolina; Ontario, Canada; Quebec, Canada; "
+                "United States of America; US"
+            ),
+            description="Clinical trial work to manage projects and project timelines.",
+        )
+    )
+    result = match_job(parsed, PROFILES["clinical-discovery"], preferences)
+    assert result.eligible
+
+
 def test_remote_only_location_is_filtered():
     parsed = parse_job(
         job(title="Senior Data Analyst", location="Remote US", description="SQL and Tableau.")

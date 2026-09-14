@@ -319,18 +319,39 @@ class WorkdaySource(JobSource):
                         continue
                     seen.add(external_path)
                     detail_url = cfg.get("detail_base_url", "").rstrip("/") + external_path
+                    location_parts = [item.get("locationsText", "")]
                     bullet_fields = item.get("bulletFields") or []
                     if isinstance(bullet_fields, list):
                         description = " ".join(str(value) for value in bullet_fields)
                     else:
                         description = str(bullet_fields)
                     if cfg.get("detail_api_base"):
-                        detail_response = await self.client.get(
-                            cfg["detail_api_base"].rstrip("/") + external_path
-                        )
-                        detail_response.raise_for_status()
-                        detail = detail_response.json().get("jobPostingInfo", {})
-                        description = _html_text(detail.get("jobDescription") or description)
+                        try:
+                            detail_response = await self.client.get(
+                                cfg["detail_api_base"].rstrip("/") + external_path
+                            )
+                            detail_response.raise_for_status()
+                            detail = detail_response.json().get("jobPostingInfo", {})
+                            description = _html_text(detail.get("jobDescription") or description)
+                            detail_locations = [
+                                detail.get("location"),
+                                *(detail.get("additionalLocations") or []),
+                                (detail.get("country") or {}).get("descriptor"),
+                                (detail.get("jobRequisitionLocation") or {})
+                                .get("country", {})
+                                .get("alpha2Code"),
+                            ]
+                            for location in detail_locations:
+                                if location and location.casefold() not in {
+                                    value.casefold() for value in location_parts if value
+                                }:
+                                    location_parts.append(location)
+                        except (httpx.HTTPError, ValueError, TypeError, AttributeError):
+                            logger.warning(
+                                "Unable to enrich Workday detail for %s%s; using listing fields",
+                                self.company.slug,
+                                external_path,
+                            )
                     _append_raw_job(
                         jobs,
                         "Workday",
@@ -339,7 +360,7 @@ class WorkdaySource(JobSource):
                         source_company=self.company.slug,
                         external_job_id=external_path,
                         title=title,
-                        location_raw=item.get("locationsText", ""),
+                        location_raw="; ".join(str(value) for value in location_parts if value),
                         description_raw=description,
                         posted_at=_parse_datetime(item.get("postedOn")),
                         url=detail_url or f"https://{site}{external_path}",
