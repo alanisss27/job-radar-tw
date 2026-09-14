@@ -1,5 +1,6 @@
 import json
 
+from click import unstyle
 from typer.testing import CliRunner
 
 import job_monitor.cli as cli
@@ -21,7 +22,7 @@ def test_suppress_notifications_requires_backfill():
     result = CliRunner().invoke(app, ["run", "--suppress-notifications"])
 
     assert result.exit_code != 0
-    assert "--suppress-notifications requires --backfill" in result.stderr
+    assert "--suppress-notifications requires --backfill" in unstyle(result.stderr)
 
 
 def test_suppressed_backfill_does_not_require_telegram_secrets(monkeypatch):
