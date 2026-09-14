@@ -261,6 +261,11 @@ class SmartRecruitersSource(JobSource):
                     description_raw=description,
                     posted_at=_parse_datetime(item.get("releasedDate")),
                     url=f"https://jobs.smartrecruiters.com/{identifier}/{item_id}",
+                    metadata={
+                        "smartrecruiters": {
+                            "country_code": str(location.get("country", "")).strip().lower()
+                        }
+                    },
                 )
             offset += len(content)
             if not content or offset >= int(payload.get("totalFound", offset)):

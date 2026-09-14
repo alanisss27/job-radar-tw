@@ -214,6 +214,36 @@ async def test_smartrecruiters_pagination():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("country", ["ca", "us"])
+@respx.mock
+async def test_smartrecruiters_preserves_structured_country_code(country):
+    endpoint = "https://api.smartrecruiters.com/v1/companies/acme/postings"
+    respx.get(endpoint).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "totalFound": 1,
+                "content": [
+                    {
+                        "id": "s",
+                        "name": "Clinical Project Manager",
+                        "location": {"country": country},
+                    }
+                ],
+            },
+        )
+    )
+    respx.get(endpoint + "/s").mock(
+        return_value=httpx.Response(200, json={"jobAd": {"sections": {}}})
+    )
+    async with httpx.AsyncClient() as client:
+        rows = await SmartRecruitersSource(
+            company("smartrecruiters", {"company_identifier": "acme"}), client
+        ).fetch()
+    assert rows[0].metadata["smartrecruiters"]["country_code"] == country
+
+
+@pytest.mark.asyncio
 @respx.mock
 async def test_workday_searches_and_deduplicates():
     endpoint = "https://acme.wd1.myworkdayjobs.com/wday/cxs/acme/External/jobs"

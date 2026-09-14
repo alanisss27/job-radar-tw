@@ -285,6 +285,15 @@ def location_eligible(job: ParsedJob, preferences: SearchPreferences) -> bool:
     location_lower = location.casefold()
     foreign_hits = _discovery_hits(location_lower, FOREIGN_LOCATION_TERMS)
     us_evidence = _discovery_hits(location_lower, US_LOCATION_TERMS)
+    smartrecruiters = job.raw.metadata.get("smartrecruiters")
+    country_code = smartrecruiters.get("country_code") if isinstance(smartrecruiters, dict) else None
+    if (
+        isinstance(country_code, str)
+        and re.fullmatch(r"[a-z]{2}", country_code)
+        and country_code != "us"
+        and not us_evidence
+    ):
+        return False
     if foreign_hits and not us_evidence:
         return False
     if job.remote_type == RemoteType.REMOTE:

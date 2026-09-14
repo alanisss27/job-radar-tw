@@ -143,6 +143,47 @@ def test_workday_enriched_us_canada_location_remains_eligible():
     assert result.eligible
 
 
+@pytest.mark.parametrize("country_code", ["ca", "jp", "cl", "mx"])
+def test_smartrecruiters_non_us_country_code_is_filtered(country_code):
+    preferences = SearchPreferences(location_terms=[], include_remote=True)
+    raw = job(
+        title="Clinical Project Manager",
+        location="Remote, REMOTE, " + country_code,
+        description="Clinical project management for a global trial.",
+    )
+    raw.metadata = {"smartrecruiters": {"country_code": country_code}}
+    result = match_job(parse_job(raw), PROFILES["clinical-discovery"], preferences)
+    assert result.filtered_reason == "location"
+
+
+def test_smartrecruiters_us_country_code_remains_eligible():
+    preferences = SearchPreferences(location_terms=[], include_remote=True)
+    raw = job(
+        title="Clinical Project Manager",
+        location="Remote, REMOTE, us",
+        description="Clinical project management for a global trial.",
+    )
+    raw.metadata = {"smartrecruiters": {"country_code": "us"}}
+    result = match_job(parse_job(raw), PROFILES["clinical-discovery"], preferences)
+    assert result.eligible
+
+
+def test_plain_us_state_text_without_smartrecruiters_metadata_is_not_filtered_as_canada():
+    preferences = SearchPreferences(location_terms=[], include_remote=True)
+    result = match_job(
+        parse_job(
+            job(
+                title="Clinical Project Manager",
+                location="Remote, CA",
+                description="Clinical project management for a global trial.",
+            )
+        ),
+        PROFILES["clinical-discovery"],
+        preferences,
+    )
+    assert result.eligible
+
+
 def test_remote_only_location_is_filtered():
     parsed = parse_job(
         job(title="Senior Data Analyst", location="Remote US", description="SQL and Tableau.")
