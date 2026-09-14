@@ -29,6 +29,9 @@ jobs:
       - name: Install Cloudflare dependencies
         working-directory: cloudflare
         run: npm ci
+      - name: Test Cloudflare dashboard
+        working-directory: cloudflare
+        run: npm test
       - name: Build Cloudflare dashboard
         working-directory: cloudflare
         run: npm run build

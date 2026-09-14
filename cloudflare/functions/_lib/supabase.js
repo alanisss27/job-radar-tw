@@ -57,23 +57,47 @@ export async function supabaseFetch(env, path, init = {}) {
 }
 
 export async function fetchMatchedJobs(env, days, limit = 200) {
+  if (!Number.isFinite(limit) || limit <= 0) return [];
+  limit = Math.floor(limit);
+  const pageSize = Math.min(limit, 200);
   const params = new URLSearchParams({
     select:
-      "id,title,location_raw,canonical_url,first_seen_at,source_posted_at,status,companies(name,industry,ats_type),applications(stage,notes,first_applied_at,first_interview_at,updated_at),match_results!inner(score,eligible)",
+      "id,title,location_raw,canonical_url,first_seen_at,source_posted_at,status,content_hash,companies(name,industry,ats_type),applications(stage,notes,first_applied_at,first_interview_at,updated_at),match_results!inner(job_id,content_hash,score,eligible)",
     status: "eq.active",
     first_seen_at: `gte.${sinceIso(days)}`,
     "match_results.eligible": "eq.true",
-    order: "first_seen_at.desc",
-    limit: String(limit),
+    order: "first_seen_at.desc,id.asc",
+    limit: String(pageSize),
   });
-  const rows = await supabaseFetch(env, `jobs?${params.toString()}`);
-  return rows.map(normalizeJob).sort((a, b) => b.score - a.score);
+  const jobs = [];
+  let offset = 0;
+  // Apply the limit to current matches, not raw rows containing historical matches.
+  // Continue after short pages too: Supabase may impose a smaller page cap.
+  while (jobs.length < limit) {
+    params.set("offset", String(offset));
+    const rows = await supabaseFetch(env, `jobs?${params.toString()}`);
+    if (!rows.length) break;
+    offset += rows.length;
+    for (const row of rows) {
+      const job = normalizeJob(row);
+      if (job) jobs.push(job);
+      if (jobs.length === limit) break;
+    }
+  }
+  return jobs.sort((a, b) => b.score - a.score);
 }
 
 export function normalizeJob(row) {
+  if (typeof row.content_hash !== "string" || !row.content_hash.length) return null;
   const scores = Array.isArray(row.match_results)
-    ? row.match_results.map((item) => Number(item.score || 0))
+    ? row.match_results
+        .filter((item) =>
+          item.job_id === row.id &&
+          item.content_hash === row.content_hash &&
+          item.eligible === true)
+        .map((item) => Number(item.score || 0))
     : [];
+  if (!scores.length) return null;
   const application = Array.isArray(row.applications) ? row.applications[0] : row.applications;
   const company = Array.isArray(row.companies) ? row.companies[0] : row.companies;
   return {
@@ -87,7 +111,7 @@ export function normalizeJob(row) {
     company: company?.name || "Unknown",
     industry: company?.industry || "unknown",
     source: company?.ats_type || "unknown",
-    score: scores.length ? Math.max(...scores) : 0,
+    score: Math.max(...scores),
     stage: application?.stage || "recommended",
     notes: application?.notes || null,
     first_applied_at: application?.first_applied_at || null,
