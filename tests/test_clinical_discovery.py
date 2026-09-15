@@ -487,6 +487,7 @@ def test_discovery_configuration_and_company_scope():
         "syner-g",
         "natera",
         "agc-biologics",
+        "fortrea",
         "parexel",
         "worldwide-clinical-trials",
         "psi-cro",
@@ -499,6 +500,22 @@ def test_discovery_configuration_and_company_scope():
 
     for company in COMPANIES.values():
         assert set(company.profiles) <= set(PROFILES)
+
+
+def test_fortrea_workday_source_contract_is_enabled():
+    company = COMPANIES["fortrea"]
+    assert company.name == "Fortrea"
+    assert company.enabled
+    assert company.source_verified
+    assert company.profiles == ["clinical-discovery"]
+    assert company.ats_type.value == "workday"
+    assert company.ats_config == {
+        "endpoint": "https://fortrea.wd1.myworkdayjobs.com/wday/cxs/fortrea/Fortrea/jobs",
+        "site": "fortrea.wd1.myworkdayjobs.com",
+        "detail_base_url": "https://fortrea.wd1.myworkdayjobs.com/en-US/Fortrea",
+        "detail_api_base": "https://fortrea.wd1.myworkdayjobs.com/wday/cxs/fortrea/Fortrea",
+        "applied_facets": {"locationCountry": ["bc33aa3152ec42d4995f4791a106ed09"]},
+    }
 
 
 @pytest.mark.asyncio

@@ -75,6 +75,23 @@ companies:
     priority: 2
     enabled: true
     source_verified: true
+  - slug: fortrea
+    name: Fortrea
+    careers_url: https://fortrea.wd1.myworkdayjobs.com/en-US/Fortrea
+    ats_type: workday
+    ats_config:
+      endpoint: https://fortrea.wd1.myworkdayjobs.com/wday/cxs/fortrea/Fortrea/jobs
+      site: fortrea.wd1.myworkdayjobs.com
+      detail_base_url: https://fortrea.wd1.myworkdayjobs.com/en-US/Fortrea
+      detail_api_base: https://fortrea.wd1.myworkdayjobs.com/wday/cxs/fortrea/Fortrea
+      applied_facets:
+        locationCountry:
+          - bc33aa3152ec42d4995f4791a106ed09
+    industry: clinical-services
+    profiles: [clinical-discovery]
+    priority: 2
+    enabled: true
+    source_verified: true
   - {slug: worldwide-clinical-trials, name: Worldwide Clinical Trials, careers_url: "https://worldwide.wd1.myworkdayjobs.com/en-US/External", ats_type: workday, ats_config: {endpoint: "https://worldwide.wd1.myworkdayjobs.com/wday/cxs/worldwide/External/jobs", site: "worldwide.wd1.myworkdayjobs.com", detail_base_url: "https://worldwide.wd1.myworkdayjobs.com/en-US/External", detail_api_base: "https://worldwide.wd1.myworkdayjobs.com/wday/cxs/worldwide/External"}, industry: clinical-services, profiles: [clinical-discovery], priority: 2, enabled: true, source_verified: true}
   - {slug: psi-cro, name: PSI CRO, careers_url: "https://careers.smartrecruiters.com/PSICRO", ats_type: smartrecruiters, ats_config: {company_identifier: PSICRO}, industry: clinical-services, profiles: [clinical-discovery], priority: 2, enabled: true, source_verified: true}
   - {slug: clarify-health, name: Clarify Health, careers_url: "https://boards.greenhouse.io/clarifyhealth", ats_type: greenhouse, ats_config: {board_token: clarifyhealth}, industry: healthcare, profiles: [healthcare, tech], priority: 1, enabled: false, source_verified: false}
