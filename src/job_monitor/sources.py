@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 
@@ -278,6 +279,19 @@ class WorkdaySource(JobSource):
         cfg = self.company.ats_config
         endpoint = cfg["endpoint"]
         site = cfg["site"]
+        applied_facets = cfg.get("applied_facets", {})
+        if not isinstance(applied_facets, Mapping) or any(
+            not isinstance(key, str)
+            or not key.strip()
+            or not isinstance(values, list)
+            or any(not isinstance(value, str) or not value.strip() for value in values)
+            for key, values in applied_facets.items()
+        ):
+            raise SourceError(
+                f"Workday applied_facets for {self.company.slug} must map nonempty "
+                "string keys to lists of nonempty string IDs"
+            )
+        applied_facets = dict(applied_facets)
         limit = int(cfg.get("limit", 20))
         jobs: list[RawJob] = []
         seen: set[str] = set()
@@ -289,7 +303,7 @@ class WorkdaySource(JobSource):
                 response = await self.client.post(
                     endpoint,
                     json={
-                        "appliedFacets": {},
+                        "appliedFacets": applied_facets,
                         "limit": limit,
                         "offset": offset,
                         "searchText": search_text,

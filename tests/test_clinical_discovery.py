@@ -487,6 +487,7 @@ def test_discovery_configuration_and_company_scope():
         "syner-g",
         "natera",
         "agc-biologics",
+        "parexel",
         "worldwide-clinical-trials",
         "psi-cro",
     }

@@ -57,6 +57,24 @@ companies:
   - {slug: syner-g, name: Syner-G BioPharma Group, careers_url: "https://job-boards.greenhouse.io/synerg", ats_type: greenhouse, ats_config: {board_token: synerg}, industry: clinical-services, profiles: [clinical-discovery], priority: 2, enabled: true, source_verified: true}
   - {slug: natera, name: Natera, careers_url: "https://job-boards.greenhouse.io/natera", ats_type: greenhouse, ats_config: {board_token: natera}, industry: medtech, profiles: [clinical-discovery], priority: 1, enabled: true, source_verified: true}
   - {slug: agc-biologics, name: AGC Biologics, careers_url: "https://agcbio.wd5.myworkdayjobs.com/agcbio_careers", ats_type: workday, ats_config: {endpoint: "https://agcbio.wd5.myworkdayjobs.com/wday/cxs/agcbio/agcbio_careers/jobs", site: "agcbio.wd5.myworkdayjobs.com", detail_base_url: "https://agcbio.wd5.myworkdayjobs.com/en-US/agcbio_careers", detail_api_base: "https://agcbio.wd5.myworkdayjobs.com/wday/cxs/agcbio/agcbio_careers"}, industry: biotech-services, profiles: [clinical-discovery], priority: 1, enabled: true, source_verified: true}
+  - slug: parexel
+    name: Parexel
+    careers_url: https://parexel.wd1.myworkdayjobs.com/en-US/Parexel_External_Careers
+    ats_type: workday
+    ats_config:
+      endpoint: https://parexel.wd1.myworkdayjobs.com/wday/cxs/parexel/Parexel_External_Careers/jobs
+      site: parexel.wd1.myworkdayjobs.com
+      detail_base_url: https://parexel.wd1.myworkdayjobs.com/en-US/Parexel_External_Careers
+      detail_api_base: https://parexel.wd1.myworkdayjobs.com/wday/cxs/parexel/Parexel_External_Careers
+      limit: 20
+      applied_facets:
+        locationCountry:
+          - bc33aa3152ec42d4995f4791a106ed09
+    industry: biotech-services
+    profiles: [clinical-discovery]
+    priority: 2
+    enabled: false
+    source_verified: true
   - {slug: worldwide-clinical-trials, name: Worldwide Clinical Trials, careers_url: "https://worldwide.wd1.myworkdayjobs.com/en-US/External", ats_type: workday, ats_config: {endpoint: "https://worldwide.wd1.myworkdayjobs.com/wday/cxs/worldwide/External/jobs", site: "worldwide.wd1.myworkdayjobs.com", detail_base_url: "https://worldwide.wd1.myworkdayjobs.com/en-US/External", detail_api_base: "https://worldwide.wd1.myworkdayjobs.com/wday/cxs/worldwide/External"}, industry: clinical-services, profiles: [clinical-discovery], priority: 2, enabled: true, source_verified: true}
   - {slug: psi-cro, name: PSI CRO, careers_url: "https://careers.smartrecruiters.com/PSICRO", ats_type: smartrecruiters, ats_config: {company_identifier: PSICRO}, industry: clinical-services, profiles: [clinical-discovery], priority: 2, enabled: true, source_verified: true}
   - {slug: clarify-health, name: Clarify Health, careers_url: "https://boards.greenhouse.io/clarifyhealth", ats_type: greenhouse, ats_config: {board_token: clarifyhealth}, industry: healthcare, profiles: [healthcare, tech], priority: 1, enabled: false, source_verified: false}

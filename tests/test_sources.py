@@ -1,7 +1,12 @@
+import json
+from copy import deepcopy
+from pathlib import Path
+
 import httpx
 import pytest
 import respx
 
+from job_monitor.config import load_companies
 from job_monitor.models import CompanyConfig
 from job_monitor.sources import (
     AshbySource,
@@ -686,3 +691,167 @@ async def test_workday_rejects_invalid_job_postings(payload):
     async with httpx.AsyncClient() as client:
         with pytest.raises(SourceError, match="jobPostings"):
             await WorkdaySource(cfg, client).fetch()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "facet_config",
+    [
+        {},
+        {"applied_facets": {}},
+        {"applied_facets": {"country": ["US", "CA"], "type": ["regular"]}},
+    ],
+)
+@respx.mock
+async def test_workday_facets_across_pages_and_searches(facet_config):
+    endpoint = "https://acme.wd1.myworkdayjobs.com/wday/cxs/acme/External/jobs"
+    cfg = company(
+        "workday",
+        {
+            "endpoint": endpoint,
+            "site": "acme.wd1.myworkdayjobs.com",
+            "detail_base_url": "https://acme.wd1.myworkdayjobs.com/en-US/External",
+            "limit": 1,
+            "search_texts": ["clinical", "project"],
+            **facet_config,
+        },
+    )
+    original = deepcopy(cfg.ats_config)
+
+    def respond(request):
+        body = json.loads(request.content)
+        offset = body["offset"]
+        return httpx.Response(
+            200,
+            json={
+                "total": 2,
+                "jobPostings": [
+                    {
+                        "title": "Clinical Project Manager",
+                        "externalPath": f"/job/US/R{offset}",
+                        "locationsText": "United States",
+                    }
+                ],
+            },
+        )
+
+    route = respx.post(endpoint).mock(side_effect=respond)
+    async with httpx.AsyncClient() as client:
+        rows = await WorkdaySource(cfg, client).fetch()
+    bodies = [json.loads(call.request.content) for call in route.calls]
+    assert [(b["searchText"], b["offset"]) for b in bodies] == [
+        ("clinical", 0),
+        ("clinical", 1),
+        ("project", 0),
+        ("project", 1),
+    ]
+    assert all(b["appliedFacets"] == facet_config.get("applied_facets", {}) for b in bodies)
+    assert all(b["limit"] == 1 for b in bodies)
+    assert len(rows) == 2
+    assert cfg.ats_config == original
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "facets",
+    [
+        None,
+        False,
+        [],
+        "US",
+        {"": ["US"]},
+        {" ": ["US"]},
+        {1: ["US"]},
+        {"country": None},
+        {"country": "US"},
+        {"country": ("US",)},
+        {"country": [None]},
+        {"country": [1]},
+        {"country": [""]},
+        {"country": [" "]},
+    ],
+)
+@respx.mock
+async def test_workday_invalid_facets_fail_before_http(facets):
+    cfg = company(
+        "workday",
+        {
+            "endpoint": "https://example.com/jobs",
+            "site": "example.com",
+            "detail_base_url": "https://example.com",
+            "applied_facets": facets,
+        },
+    )
+    async with httpx.AsyncClient() as client:
+        with pytest.raises(SourceError, match="applied_facets"):
+            await WorkdaySource(cfg, client).fetch()
+    assert len(respx.calls) == 0
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_parexel_disabled_us_facet_contract():
+    cfg = next(
+        c
+        for c in load_companies(Path(__file__).resolve().parents[1] / "config/companies.yml")
+        if c.slug == "parexel"
+    )
+    assert cfg.enabled is False
+    assert cfg.source_verified is True
+    assert cfg.profiles == ["clinical-discovery"]
+    facets = {"locationCountry": ["bc33aa3152ec42d4995f4791a106ed09"]}
+    assert cfg.ats_config["applied_facets"] == facets
+    # A scoped response fixture tests our request/response contract, not Workday's
+    # server-side geographic classification. No client-side country filter is implied.
+    samples = [
+        (
+            "R0000044679",
+            "Bilingual Research Associate (English and Mandarin)",
+            "United States - Glendale - California",
+            [],
+        ),
+        ("R0000044686", "Digital Pathology Project Manager", "United States - Remote", []),
+        (
+            "R0000045298",
+            "Clinical Research Associate",
+            "United States-New York-Remote",
+            ["United States - Remote"],
+        ),
+    ]
+    postings = []
+    for job_id, title, location, additional in samples:
+        path = f"/job/US/{job_id}"
+        postings.append(
+            {
+                "title": title,
+                "externalPath": path,
+                "locationsText": "2 Locations" if additional else location,
+            }
+        )
+        respx.get(cfg.ats_config["detail_api_base"] + path).respond(
+            200,
+            json={
+                "jobPostingInfo": {
+                    "jobDescription": "<p>Clinical study coordination</p>",
+                    "location": location,
+                    "additionalLocations": additional,
+                    "country": {"descriptor": "United States of America"},
+                    "jobRequisitionLocation": {"country": {"alpha2Code": "US"}},
+                }
+            },
+        )
+    route = respx.post(cfg.ats_config["endpoint"]).respond(
+        200, json={"total": 3, "jobPostings": postings}
+    )
+    async with httpx.AsyncClient() as client:
+        rows = await WorkdaySource(cfg, client).fetch()
+    assert json.loads(route.calls[0].request.content)["appliedFacets"] == facets
+    assert {r.external_job_id.rsplit("/", 1)[-1] for r in rows} == {s[0] for s in samples}
+    assert not any(
+        china_id in r.external_job_id for r in rows for china_id in ("R0000034848", "R0000036586")
+    )
+    assert all(r.description_raw == "Clinical study coordination" for r in rows)
+    assert "Glendale" in rows[0].location_raw
+    assert "United States - Remote" in rows[1].location_raw
+    assert "United States-New York-Remote" in rows[2].location_raw
+    assert "United States - Remote" in rows[2].location_raw
