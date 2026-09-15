@@ -9,6 +9,23 @@ from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_ex
 
 from .models import MatchedJob, MatchResult, ParsedJob
 
+REVIEW_LABELS = {
+    "title_body_level_mismatch": "職稱與要求層級不一致",
+    "established_ownership_requirement": "要求直接 PM/CTM 經驗或完整管理責任",
+}
+
+
+def _summary_score(result: MatchResult) -> str:
+    label = "探索相關度 " if result.profile == "clinical-discovery" else ""
+    return f"{html.escape(str(result.profile))} {label}{result.score:.0%}"
+
+
+def _summary_review(result: MatchResult) -> str:
+    if result.profile != "clinical-discovery":
+        return ""
+    labels = "；".join(REVIEW_LABELS[flag.code] for flag in result.review_flags)
+    return "\n  待確認：" + (labels or "候選人資格尚未核實")
+
 
 def _as_utc(value: datetime) -> datetime:
     if value.tzinfo is None:
@@ -82,6 +99,35 @@ def render_job_message(
         changed=changed,
         display_timezone=display_timezone,
     )
+    if result.profile == "clinical-discovery":
+        evidence = (
+            "、".join(
+                reason
+                for reason in result.reasons
+                if not reason.startswith(("location:", "seniority:", "skills:"))
+            )
+            or "探索規則命中"
+        )
+        reviews = (
+            "\n".join(
+                f"{REVIEW_LABELS[flag.code]}：{'；'.join(flag.evidence)}"
+                for flag in result.review_flags
+            )
+            or "未偵測到本次兩類規則提示；不代表符合全部資格"
+        )
+        checks = "、".join(result.gaps) or "未產生其他規則提示；候選人資格尚未核實"
+        return (
+            f"🔎 探索職缺 | clinical-discovery | 探索相關度 {result.score:.0%}\n"
+            f"<b>{html.escape(company_name)} - {html.escape(job.raw.title)}</b>\n"
+            f"📍 {html.escape(job.raw.location_raw or '未提供')}\n"
+            f"探索依據：{html.escape(evidence)}\n"
+            "地點篩選：通過設定條件；非地理適配評分\n"
+            f"待確認要求：{html.escape(reviews)}\n"
+            f"自動檢查提示：{html.escape(checks)}\n"
+            "適配說明：探索相關度不代表候選人適配；由 Career-ops 深評後自行決定。\n"
+            f"新鮮度：{html.escape(freshness)}\n"
+            f'<a href="{html.escape(str(job.raw.url), quote=True)}">官方申請連結</a>'
+        )
     return (
         f"{badge} | {html.escape(str(result.profile))} | {result.score:.0%}\n"
         f"<b>{html.escape(company_name)} - {html.escape(job.raw.title)}</b>\n"
@@ -139,12 +185,20 @@ def render_run_summary(
 
     lines.append("")
     if matched_jobs:
+        if any(item.result.profile == "clinical-discovery" for item in matched_jobs):
+            lines.append(
+                "clinical-discovery 的百分比為探索相關度，非候選人適配；待 Career-ops 深評。"
+            )
         ordered = sorted(matched_jobs, key=lambda match: match.result.score, reverse=True)
         target_jobs = [item for item in ordered if item.result.bucket == "target"]
         stretch_jobs = [item for item in ordered if item.result.bucket == "stretch"]
         shown = 0
         if target_jobs:
-            lines.append("本次符合職缺：")
+            lines.append(
+                "本次探索／配對結果："
+                if any(item.result.profile == "clinical-discovery" for item in target_jobs)
+                else "本次符合職缺："
+            )
         for item in target_jobs[:max_matches]:
             freshness = render_freshness(
                 item.job.raw.posted_at,
@@ -156,13 +210,18 @@ def render_run_summary(
             lines.append(
                 f"- {html.escape(item.company_name)} - "
                 f'<a href="{html.escape(str(item.job.raw.url), quote=True)}">{html.escape(item.job.raw.title)}</a> '
-                f"({html.escape(str(item.result.profile))} {item.result.score:.0%}, "
+                f"({_summary_score(item.result)}, "
                 f"{html.escape(item.job.raw.location_raw or '未提供')}; {html.escape(freshness)})"
+                f"{_summary_review(item.result)}"
             )
             shown += 1
         remaining = max_matches - shown
         if stretch_jobs and remaining > 0:
-            lines.append("🪜 延伸職缺（高於你目前職級，可作為挑戰）：")
+            lines.append(
+                "🪜 延伸探索／配對結果："
+                if any(item.result.profile == "clinical-discovery" for item in stretch_jobs)
+                else "🪜 延伸職缺（高於你目前職級，可作為挑戰）："
+            )
         for item in stretch_jobs[:remaining]:
             freshness = render_freshness(
                 item.job.raw.posted_at,
@@ -174,8 +233,9 @@ def render_run_summary(
             lines.append(
                 f"- {html.escape(item.company_name)} - "
                 f'<a href="{html.escape(str(item.job.raw.url), quote=True)}">{html.escape(item.job.raw.title)}</a> '
-                f"({html.escape(str(item.result.profile))} {item.result.score:.0%}, "
+                f"({_summary_score(item.result)}, "
                 f"{html.escape(item.job.raw.location_raw or '未提供')}; {html.escape(freshness)})"
+                f"{_summary_review(item.result)}"
             )
             shown += 1
         if len(matched_jobs) > shown:

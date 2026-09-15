@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import re
 
 from .config import ProfileConfig, SearchPreferences
@@ -12,10 +13,107 @@ from .models import (
     RawJob,
     RemoteType,
     ResumeProfile,
+    ReviewFlag,
     Seniority,
     VisaSupport,
 )
 from .resume import SKILL_ALIASES
+
+
+def _clinical_review_flags(title: str, description: str) -> list[ReviewFlag]:
+    """Conservative posting-only advice; never used by scoring or routing."""
+    text = re.sub(
+        r"<[^>]+>",
+        lambda m: "\n" if re.match(r"</?(?:p|li|ul|ol|div|h[1-6]|br)\b", m[0], re.I) else "",
+        description,
+    )
+    clauses = re.split(r"[\n\r•;]+|(?<!Sr\.)(?<!sr\.)(?<=[.!?])\s+(?=[A-Z])", html.unescape(text))
+    experience, ownership = [], []
+    preferred_section = False
+    for clause in clauses:
+        clause = " ".join(clause.split()).strip(" -")
+        lower = clause.lower()
+        if not clause:
+            continue
+        if re.fullmatch(
+            r"(?:preferred|desired|bonus)(?:(?: qualifications| requirements| skills| experience)(?: and experience| & experience)?)?(?: includes)?[: ]*",
+            lower,
+        ):
+            preferred_section = True
+            continue
+        if re.fullmatch(
+            r"(?:required qualifications|qualifications|requirements|responsibilities|what you.ll do|skills and experience you.ll bring)[: ]*",
+            lower,
+        ):
+            preferred_section = False
+            continue
+        if preferred_section or re.search(
+            r"\b(preferred|desirable|optional|a plus|nice to have|not required|support\w*|assist\w*|participat\w*)\b|\b(report\w* to|work\w* with)\b|\bno\b.*\brequired\b",
+            lower,
+        ):
+            continue
+        mandatory = bool(
+            re.search(
+                r"\b(required|must|minimum|at least)\b|\b\d+\s*(?:[–-]\s*\d+)?\s*\+?\s*years?\b",
+                lower,
+            )
+        )
+        direct = mandatory and bool(
+            re.search(r"\b(experience|years?)\b", lower)
+            and re.search(
+                r"\bdirect (?:project|clinical trial|pm|ctm)[ /-]*(?:management|experience)\b"
+                r"|\bas (?:a |an )?(?:project/clinical trial|clinical trial|project) manager\b"
+                r"|\b(?:project/clinical trial|clinical trial|project) management experience\b"
+                r"|\byears?\s*\((?:sr\.?\s*)?ctm\)",
+                lower,
+            )
+        )
+        # Require the action to govern project/trial work, not meetings about it.
+        # Conservatively skip negation and meeting/discussion clauses instead of
+        # inferring their grammatical scope.
+        accountable = not re.search(
+            r"\b(?:not|never|without|meetings?|discuss\w*|facilitat\w*)\b"
+            r"|\b(?:isn|aren|won|don|doesn)['’]t\b",
+            lower,
+        ) and bool(
+            re.search(
+                r"\b(?:own|owns|owning|accountable for|responsible for|lead|leads|leading)\s+"
+                r"(?:(?:the|assigned)\s+)*(?:project|program|trial|study)\b",
+                lower,
+            )
+        )
+        scope = all(
+            re.search(pattern, lower)
+            for pattern in (r"\bscope\b", r"\btimelines?\b", r"\bbudgets?\b")
+        )
+        client = bool(
+            re.search(r"\bprimary client\b", lower)
+            and re.search(r"\b(?:project|program) delivery\b", lower)
+        )
+        lifecycle = bool(
+            re.search(r"\b(project|trial|study)\b", lower)
+            and re.search(
+                r"\b(?:initiation|start[ -]?up)\b.+\b(?:through|to)\b.+\bclose[ -]?out\b", lower
+            )
+        )
+        evidence = clause if len(clause) <= 240 else clause[:239] + "…"
+        if direct and evidence not in experience and len(experience) < 2:
+            experience.append(evidence)
+        if (
+            (direct or accountable and (scope or client or lifecycle))
+            and evidence not in ownership
+            and len(ownership) < 2
+        ):
+            ownership.append(evidence)
+    flags = []
+    associate = re.search(r"\b(associate|coordinator|cta)\b", title, re.I)
+    manager = re.search(r"\b(director|manager|head|president)\b", title, re.I)
+    if associate and not manager and experience:
+        flags.append(ReviewFlag(code="title_body_level_mismatch", evidence=experience[:2]))
+    if ownership:
+        flags.append(ReviewFlag(code="established_ownership_requirement", evidence=ownership[:2]))
+    return flags
+
 
 REMOTE_TERMS = ["remote", "united states - remote", "remote us", "remote, us"]
 # Explicit foreign location markers are rejected, while an unqualified
@@ -571,4 +669,9 @@ def match_job(
         bucket=bucket,
         level=job.level.value if candidate else None,
         required_years_min=job.required_years_min if candidate else None,
+        review_flags=(
+            _clinical_review_flags(job.raw.title, job.raw.description_raw)
+            if profile.name == "clinical-discovery"
+            else []
+        ),
     )

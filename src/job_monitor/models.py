@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
@@ -233,6 +233,11 @@ class ResumeProfile(BaseModel):
     skills: list[str] = Field(default_factory=list)
 
 
+class ReviewFlag(BaseModel):
+    code: Literal["title_body_level_mismatch", "established_ownership_requirement"]
+    evidence: list[str] = Field(max_length=2)
+
+
 class MatchResult(BaseModel):
     profile: str
     score: float = Field(ge=0, le=1)
@@ -240,6 +245,8 @@ class MatchResult(BaseModel):
     tier: str
     reasons: list[str] = Field(default_factory=list)
     gaps: list[str] = Field(default_factory=list)
+    # Preserve existing serialized payloads (and notification claims) when there is no advice.
+    review_flags: list[ReviewFlag] = Field(default_factory=list, exclude_if=lambda value: not value)
     filtered_reason: str | None = None
     used_llm: bool = False
     fit: float = 0.0
