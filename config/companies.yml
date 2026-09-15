@@ -73,7 +73,7 @@ companies:
     industry: biotech-services
     profiles: [clinical-discovery]
     priority: 2
-    enabled: false
+    enabled: true
     source_verified: true
   - {slug: worldwide-clinical-trials, name: Worldwide Clinical Trials, careers_url: "https://worldwide.wd1.myworkdayjobs.com/en-US/External", ats_type: workday, ats_config: {endpoint: "https://worldwide.wd1.myworkdayjobs.com/wday/cxs/worldwide/External/jobs", site: "worldwide.wd1.myworkdayjobs.com", detail_base_url: "https://worldwide.wd1.myworkdayjobs.com/en-US/External", detail_api_base: "https://worldwide.wd1.myworkdayjobs.com/wday/cxs/worldwide/External"}, industry: clinical-services, profiles: [clinical-discovery], priority: 2, enabled: true, source_verified: true}
   - {slug: psi-cro, name: PSI CRO, careers_url: "https://careers.smartrecruiters.com/PSICRO", ats_type: smartrecruiters, ats_config: {company_identifier: PSICRO}, industry: clinical-services, profiles: [clinical-discovery], priority: 2, enabled: true, source_verified: true}

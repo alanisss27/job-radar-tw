@@ -790,13 +790,13 @@ async def test_workday_invalid_facets_fail_before_http(facets):
 
 @pytest.mark.asyncio
 @respx.mock
-async def test_parexel_disabled_us_facet_contract():
+async def test_parexel_enabled_us_facet_contract():
     cfg = next(
         c
         for c in load_companies(Path(__file__).resolve().parents[1] / "config/companies.yml")
         if c.slug == "parexel"
     )
-    assert cfg.enabled is False
+    assert cfg.enabled is True
     assert cfg.source_verified is True
     assert cfg.profiles == ["clinical-discovery"]
     facets = {"locationCountry": ["bc33aa3152ec42d4995f4791a106ed09"]}
