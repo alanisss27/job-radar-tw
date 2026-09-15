@@ -590,3 +590,94 @@ def test_ordinary_discovery_match_reaches_handoff(tmp_path):
         assert "description_raw" not in rows[0]
     finally:
         db.engine.dispose()
+
+
+@pytest.mark.parametrize(
+    "title, description, expected",
+    [
+        (
+            "Bilingual Research Associate (English and Mandarin)",
+            "Recruit study participants and conduct protocol-specific study visits. Maintain study logs and assure source documents and CRFs are complete. Fluent Mandarin preferred.",
+            True,
+        ),
+        (
+            "Clinical Research Coordinator",
+            "Coordinate clinical study activities across investigators and project managers. Lead planning, execution, and closeout of Phase I trials under the study protocol.",
+            True,
+        ),
+        (
+            "Project Specialist",
+            "Maintain project management plans and track project action items for clinical research deliverables. Support CTMS setup and study initiation.",
+            True,
+        ),
+        (
+            "Research Associate",
+            "Recruit study participants and conduct screening visits. Maintain study logs and source documents.",
+            True,
+        ),
+        (
+            "Bilingual Enrollment Coordinator",
+            "Screen clinical trial participants according to the study protocol and complete enrollment documentation. Korean fluent.",
+            True,
+        ),
+        (
+            "Research Associate",
+            "Recruit employees for hiring. Maintain source documents for the company.",
+            False,
+        ),
+        (
+            "Research Associate",
+            "Screen customers for marketing studies. Our clinical company supports trials.",
+            False,
+        ),
+        (
+            "Research Associate",
+            "Screen specimens for assays. CRFs are used elsewhere in the company.",
+            False,
+        ),
+        ("Research Associate", "Recruit study participants for a clinical trial.", False),
+        ("Research Associate", "Maintain source documents and CRFs for studies.", False),
+        (
+            "Enrollment Coordinator",
+            "Process university admissions and enrollment inquiries.",
+            False,
+        ),
+        ("Enrollment Coordinator", "Sell customer enrollment packages and manage accounts.", False),
+        (
+            "IT Project Specialist",
+            "Maintain project plans and track action items for software releases. Support IT system deployment.",
+            False,
+        ),
+        (
+            "Project Specialist",
+            "Maintain project plans and action items. Our company supports clinical research and life sciences.",
+            False,
+        ),
+        (
+            "Research Associate",
+            "Work in a preclinical laboratory conducting animal studies and assays. Maintain source documents.",
+            False,
+        ),
+    ],
+)
+def test_bounded_clinical_discovery_paths(title, description, expected):
+    assert match(title, description).eligible is expected
+
+
+def test_new_discovery_paths_preserve_profile_independence():
+    posting = parse_job(
+        raw(
+            "Project Specialist",
+            "Maintain project plans for clinical study deliverables and support CTMS study initiation.",
+        )
+    )
+    assert not match_job(posting, PROFILES["tech"], PREFERENCES).eligible
+
+
+def test_support_language_does_not_create_ownership_flag():
+    result = match(
+        "Project Specialist",
+        "Support project plans and participate in CTMS study initiation for clinical research.",
+    )
+    assert result.eligible
+    assert not any(flag.code == "established_ownership_requirement" for flag in result.review_flags)

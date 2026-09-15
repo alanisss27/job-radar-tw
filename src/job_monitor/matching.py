@@ -412,6 +412,100 @@ def _term_score(text: str, terms: list[str], target_hits: int = 5) -> tuple[floa
     return min(1.0, len(hits) / max(1, min(target_hits, len(terms)))), hits
 
 
+def _clinical_clauses(text: str) -> list[str]:
+    """Return short posting clauses for conservative clinical evidence checks."""
+    text = re.sub(r"<[^>]+>", "\n", text)
+    return [" ".join(part.split()).strip() for part in re.split(r"[\n.;:]+", text) if part.strip()]
+
+
+def _clinical_coordination_evidence(title: str, description: str) -> set[str]:
+    """Find bounded human-study coordination evidence for clinical discovery."""
+    lower_title = title.casefold()
+    clauses = _clinical_clauses(description)
+    evidence: set[str] = set()
+    if re.search(r"\bresearch associate\b", lower_title):
+        human = re.compile(
+            r"(?:recruit(?:ment)?|enroll(?:ment)?|screen(?:ing)?)"
+            r"[^.\n]{0,120}\b(?:participant|subject)s?\b"
+            r"|\b(?:participant|subject)s?\b[^.\n]{0,120}"
+            r"(?:recruit(?:ment)?|enroll(?:ment)?|screen(?:ing)?)",
+            re.I,
+        )
+        context = re.compile(
+            r"\b(?:clinical\s+(?:study|trial|research)|study|trial|protocol|"
+            r"protocol-specific|study\s+visit|informed\s+consent)\b",
+            re.I,
+        )
+        documentation = re.compile(
+            r"\b(?:source\s+documents?|source\s+documentation|crf|case\s+report\s+forms?|"
+            r"study\s+logs?|protocol\s+compliance|ich[- ]?gcp|gcp\s+compliance|"
+            r"clinical\s+study\s+file)\b",
+            re.I,
+        )
+        human_evidence: list[str] = []
+        for clause in clauses:
+            if human.search(clause) and context.search(clause):
+                human_evidence.append(clause)
+        if human_evidence and any(documentation.search(clause) for clause in clauses):
+            evidence.update(human_evidence)
+    elif re.search(r"\bclinical\s+research\s+coordinator\b", lower_title):
+        for clause in clauses:
+            if re.search(
+                r"\bclinical\s+(?:study|trial|research)|\bphase\s+[i1-3]", clause, re.I
+            ) and re.search(
+                r"\b(?:coordinate|planning|preparation|execution|closeout|close-out|"
+                r"study\s+activities|study\s+operations|protocol|study\s+oversight)\b",
+                clause,
+                re.I,
+            ):
+                evidence.add(clause)
+    elif re.search(
+        r"\bclinical\s+enrollment\s+coordinator\b|\benrollment\s+coordinator\b", lower_title
+    ):
+        for clause in clauses:
+            if (
+                re.search(
+                    r"\b(?:clinical\s+(?:study|trial|research)|protocol|early\s+phase|phase\s+[i1-3])\b",
+                    clause,
+                    re.I,
+                )
+                and re.search(r"\b(?:screen|screening|enroll|enrollment)\b", clause, re.I)
+                and re.search(r"\b(?:participant|subject|volunteer)s?\b", clause, re.I)
+            ):
+                evidence.add(clause)
+    return set(sorted(evidence)[:3])
+
+
+def _clinical_project_support_evidence(title: str, description: str) -> set[str]:
+    """Find task-level clinical project-support evidence, excluding boilerplate."""
+    if not re.search(r"\bproject\s+(?:specialist|coordinator)\b", title, re.I):
+        return set()
+    clauses = _clinical_clauses(description)
+    support = re.compile(
+        r"\b(?:project\s+(?:management\s+)?plans?|project-level\s+(?:reports|metrics)|"
+        r"action\s+items?|project\s+reports?|track(?:ing)?\s+(?:deliverables|actions)|"
+        r"project\s+initiation|project\s+activities)\b",
+        re.I,
+    )
+    clinical = re.compile(
+        r"\b(?:clinical\s+(?:study|trial|operations|research)|study\s+(?:team|execution|deliverables)|"
+        r"clinical\s+research|clinical\s+operations)\b",
+        re.I,
+    )
+    operational = re.compile(
+        r"\b(?:tmf|e?tmf|ctms|study\s+(?:start[ -]?up|initiation|close[ -]?out)|"
+        r"site\s+(?:activation|payments?)|clinical\s+supplies|ich[- ]?gcp|protocol\s+compliance|"
+        r"archive(?:d|ing)?\s+(?:documents|records))\b",
+        re.I,
+    )
+    matched = [clause for clause in clauses if support.search(clause)]
+    if not matched or not any(clinical.search(clause) for clause in clauses):
+        return set()
+    if not any(operational.search(clause) for clause in clauses):
+        return set()
+    return set(sorted(set(matched))[:3])
+
+
 def _level_fit(
     job: ParsedJob, candidate: CandidateProfile, company_ndx_member: bool = False
 ) -> tuple[float, int]:
@@ -544,7 +638,22 @@ def match_job(
     responsibility_title_exclusions = _discovery_hits(
         title_text, profile.responsibility_title_exclude_terms
     )
-    if profile.allow_other_job_family and not title_hit and responsibility_hits:
+    clinical_coordination_hits: set[str] = set()
+    clinical_project_support_hits: set[str] = set()
+    if profile.name == "clinical-discovery":
+        clinical_coordination_hits = _clinical_coordination_evidence(
+            job.raw.title, job.raw.description_raw
+        )
+        clinical_project_support_hits = _clinical_project_support_evidence(
+            job.raw.title, job.raw.description_raw
+        )
+    bounded_discovery_hit = bool(clinical_coordination_hits or clinical_project_support_hits)
+    if (
+        profile.allow_other_job_family
+        and not title_hit
+        and responsibility_hits
+        and not bounded_discovery_hit
+    ):
         if (
             len(responsibility_hits) < profile.responsibility_min_hits
             or profile.responsibility_requires_domain
@@ -559,7 +668,7 @@ def match_job(
                 tier="filtered",
                 filtered_reason="discovery_responsibility_evidence",
             )
-    title_score = 1.0 if title_hit or responsibility_hits else 0.0
+    title_score = 1.0 if title_hit or responsibility_hits or bounded_discovery_hit else 0.0
     profile_domain_score = min(
         1.0, sum(term.lower() in title_desc for term in profile.domain_terms) / 3
     )
@@ -608,6 +717,12 @@ def match_job(
         reasons.append("resume: " + ", ".join(sorted(resume_hits)[:5]))
     if responsibility_hits:
         reasons.append("responsibilities: " + ", ".join(sorted(responsibility_hits)[:5]))
+    if clinical_coordination_hits:
+        reasons.append("clinical coordination: " + " | ".join(sorted(clinical_coordination_hits)))
+    if clinical_project_support_hits:
+        reasons.append(
+            "clinical project support: " + " | ".join(sorted(clinical_project_support_hits))
+        )
     gaps = []
     penalty = 0.0
     if candidate:
