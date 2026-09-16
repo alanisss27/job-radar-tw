@@ -785,3 +785,41 @@ def test_support_language_does_not_create_ownership_flag():
     )
     assert result.eligible
     assert not any(flag.code == "established_ownership_requirement" for flag in result.review_flags)
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Senior Clinical Data Manager",
+        "Lead Clinical Data Manager",
+        "Clinical Data Management Manager",
+        "Clinical Data Management Lead",
+        "Clinical Team Lead",
+        "Clinical Team Leader",
+    ],
+)
+def test_specialized_clinical_occupations_are_excluded_from_responsibility_fallback(title):
+    result = match(
+        title,
+        "Manage projects, project timelines, and project deliverables for clinical operations.",
+    )
+    assert not result.eligible
+    assert result.filtered_reason == "discovery_responsibility_evidence"
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Clinical Data Project Manager",
+        "Clinical Project Manager, Data Operations",
+        "Clinical Team Project Manager",
+        "Clinical Operations Team Lead",
+        "Clinical Trial Lead",
+        "Clinical Study Lead",
+    ],
+)
+def test_near_miss_clinical_titles_remain_discoverable(title):
+    assert match(
+        title,
+        "Manage projects, project timelines, and project deliverables for clinical operations.",
+    ).eligible

@@ -38,6 +38,11 @@ profiles:
       - statistician
       - biostatistician
       - clinical programmer
+      - clinical data manager
+      - clinical data management manager
+      - clinical data management lead
+      - clinical team lead
+      - clinical team leader
     weights: {title: 0.70, domain: 0.30}
     title_terms:
       - clinical project manager
