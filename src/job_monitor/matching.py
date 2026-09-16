@@ -423,7 +423,9 @@ def _clinical_coordination_evidence(title: str, description: str) -> set[str]:
     lower_title = title.casefold()
     clauses = _clinical_clauses(description)
     evidence: set[str] = set()
-    if re.search(r"\bresearch associate\b", lower_title):
+    if re.search(r"\bclinical\s+trials?\s+administrator\b", lower_title):
+        evidence.update(_clinical_trial_administration_evidence(title, description))
+    elif re.search(r"\bresearch associate\b", lower_title):
         human = re.compile(
             r"(?:recruit(?:ment)?|enroll(?:ment)?|screen(?:ing)?)"
             r"[^.\n]{0,120}\b(?:participant|subject)s?\b"
@@ -474,6 +476,66 @@ def _clinical_coordination_evidence(title: str, description: str) -> set[str]:
             ):
                 evidence.add(clause)
     return set(sorted(evidence)[:3])
+
+
+def _clinical_trial_administration_evidence(title: str, description: str) -> set[str]:
+    if not re.search(r"\bclinical\s+trials?\s+administrator\b", title, re.I):
+        return set()
+    clauses = _clinical_clauses(description)
+    categories = {
+        "documents": re.compile(
+            r"\b(?:tmf|e?tmf|trial\s+master\s+file|clinical\s+study\s+file|"
+            r"investigator\s+files?|source\s+documents?|protocol(?:/(?:sop|regulatory)|[^.]{0,40}documentation)|"
+            r"ich[- ]?gcp|gcp\s+compliance|compliance\s+with\s+gcp)\b",
+            re.I,
+        ),
+        "tracking": re.compile(
+            r"\b(?:ctms|track(?:ing)?\s+(?:study|study\s+activities|study\s+status|"
+            r"(?:study|clinical[- ]study|clinical\s+trial)\s+suppl(?:y|ies)(?:\s+shipments?)?|"
+            r"site\s+information)|project-management\s+systems?)\b",
+            re.I,
+        ),
+        "materials": re.compile(
+            r"\b(?:study\s+materials?|clinical[- ]study\s+suppl(?:y|ies)|"
+            r"(?:study|clinical[- ]study|clinical\s+trial)\s+suppl(?:y|ies)\s+shipments?|site-specific\s+materials?|"
+            r"investigator/site\s+(?:setup|documentation))\b",
+            re.I,
+        ),
+        "meetings": re.compile(
+            r"\b(?:study|clinical\s+project)\s+team\s+(?:updates?|support)|"
+            r"investigator\s+meetings?|study[- ]team\s+(?:minutes?|correspondence)|"
+            r"study\s+action[- ]items?\b",
+            re.I,
+        ),
+        "lifecycle": re.compile(
+            r"\b(?:study\s+(?:start[- ]?up|initiation|close[- ]?out|archiving)|"
+            r"trial[- ]documentation\s+qc|clinical[- ]study\s+audit|"
+            r"(?:clinical\s+)?(?:study|trial)\s+(?:audit|capa)\s+tracking)\b",
+            re.I,
+        ),
+    }
+    context = re.compile(
+        r"\b(?:clinical\s+(?:trial|study|research\s+project)|study\s+protocol|"
+        r"clinical\s+(?:project|study)\s+team|investigator|clinical\s+site|"
+        r"ich[- ]?gcp|gcp|clinical\s+regulatory)\b",
+        re.I,
+    )
+    hits = {
+        name: [clause for clause in clauses if pattern.search(clause)]
+        for name, pattern in categories.items()
+    }
+    present = [name for name, values in hits.items() if values]
+    if len(present) < 2:
+        return set()
+    contextual = any(
+        any(pattern.search(clause) for pattern in categories.values())
+        and any(context.search(nearby) for nearby in clauses[max(0, index - 1) : index + 2])
+        for index, clause in enumerate(clauses)
+    )
+    if not contextual:
+        return set()
+    excerpts = [clause for name in present for clause in hits[name]]
+    return {f"clinical trial administration: {clause}" for clause in sorted(set(excerpts))[:3]}
 
 
 def _clinical_project_support_evidence(title: str, description: str) -> set[str]:

@@ -638,6 +638,93 @@ def test_ordinary_discovery_match_reaches_handoff(tmp_path):
             True,
         ),
         (
+            "Clinical Trials Administrator - FSP",
+            "Member of a Clinical Project Team responsible for execution of a Clinical Research Project. Maintain Trial Master File documentation and perform TMF QC. Track study activities in CTMS and coordinate study supply shipments.",
+            True,
+        ),
+        (
+            "Clinical Trial Administrator",
+            "Support clinical study team updates and maintain investigator files. Track study status in CTMS.",
+            True,
+        ),
+        (
+            "Clinical Trials Administrator",
+            "Assist with study protocol documentation and support investigator meetings. Maintain clinical study files.",
+            True,
+        ),
+        ("Clinical Trial Administrator", "Maintain TMF documentation only.", False),
+        ("Clinical Trial Administrator", "Track CTMS access only.", False),
+        ("Clinical Trial Administrator", "Maintain protocol documentation only.", False),
+        (
+            "Clinical Trial Administrator",
+            "Our company conducts clinical trials. Perform generic office filing and calendar administration.",
+            False,
+        ),
+        (
+            "Clinical Trial Administrator",
+            "Maintain project files and coordinate vendor invoices. No study or trial duties are assigned.",
+            False,
+        ),
+        (
+            "Clinical Trial Administrator",
+            "Coordinate generic supply shipments and maintain CAPA tracking. Our corporate section mentions investigators and clinical trials.",
+            False,
+        ),
+        (
+            "Clinical Trial Administrator",
+            "Maintain generic regulatory documentation and coordinate vendor shipping. Our clinical employer supports trials.",
+            False,
+        ),
+        (
+            "Clinical Trial Administrator",
+            "Follow GCP and track generic office actions for a corporate quality system.",
+            False,
+        ),
+        (
+            "Clinical Trial Administrator",
+            "Maintain generic SOP documentation and coordinate vendor supplies.",
+            False,
+        ),
+        (
+            "Clinical Data Manager",
+            "Maintain TMF and CTMS records for clinical studies.",
+            False,
+        ),
+        (
+            "Clinical Team Lead",
+            "Oversee clinical study teams and trial operations.",
+            False,
+        ),
+        (
+            "Clinical Research Associate",
+            "Monitor clinical trial sites and conduct site visits.",
+            False,
+        ),
+        ("Administrator", "Maintain clinical study files and coordinate meetings.", False),
+        ("Administrative Assistant", "Support clinical trial filing and scheduling.", False),
+        ("Project Administrator", "Track clinical project plans and vendor tasks.", False),
+        ("Admissions Enrollment Coordinator", "Process university enrollment applications.", False),
+        (
+            "Healthcare Office Administrator",
+            "Schedule patients and maintain office records.",
+            False,
+        ),
+        (
+            "Vendor Operations Coordinator",
+            "Coordinate customer implementation and vendor invoices.",
+            False,
+        ),
+        (
+            "Research Administrator",
+            "Manage preclinical animal studies and laboratory records.",
+            False,
+        ),
+        (
+            "Clinical Research Technician",
+            "Perform early-phase clinical procedures and collect samples.",
+            False,
+        ),
+        (
             "Research Associate",
             "Recruit employees for hiring. Maintain source documents for the company.",
             False,
