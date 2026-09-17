@@ -18,7 +18,10 @@ from job_monitor.storage import MatchDecision, Storage
 
 PROFILES = load_profiles(Path("config/profiles.yml"))
 PROFILE = PROFILES["clinical-discovery"]
-PREFERENCES = load_preferences(Path("config/preferences.yml"))
+# These fixtures test broad discovery, separately from candidate eligibility.
+PREFERENCES = load_preferences(Path("config/preferences.yml")).model_copy(
+    update={"candidate_eligibility": None}
+)
 COMPANIES = {company.slug: company for company in load_companies(Path("config/companies.yml"))}
 
 
@@ -421,6 +424,7 @@ def test_unrelated_titles_do_not_qualify_from_project_language(title):
 
 
 def test_discovery_configuration_and_company_scope():
+    assert load_preferences(Path("config/preferences.yml")).candidate_eligibility is not None
     assert PREFERENCES.location_terms == []
     assert PREFERENCES.include_remote
     assert PREFERENCES.excluded_seniorities == set()

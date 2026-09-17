@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     immediate_notification_max_source_age_days: int = Field(default=21, ge=0)
     immediate_notification_max_per_run: int = Field(default=5, ge=0)
     daily_summary_max_matches: int = Field(default=15, ge=1)
+    daily_summary_max_reviews: int = Field(default=5, ge=0)
     companies_config: Path = Path("config/companies.yml")
     profiles_config: Path = Path("config/profiles.yml")
     preferences_config: Path = Path("config/preferences.yml")
@@ -119,11 +120,70 @@ class ProfileConfig(BaseModel):
         return self
 
 
+class CommutingPolicy(BaseModel):
+    """State screening is not a claim that every city in a state is commutable."""
+
+    model_config = ConfigDict(extra="forbid")
+    onsite_states: set[str] | None = None
+    # Additional states to retain for review for limited/occasional attendance.
+    limited_attendance_states: set[str] = Field(default_factory=set)
+    search_area: str | None = None  # Descriptive only; never interpreted as geography.
+
+    @field_validator("onsite_states", "limited_attendance_states")
+    @classmethod
+    def valid_states(cls, values: set[str] | None) -> set[str] | None:
+        if values is None:
+            return None
+        from .eligibility import normalize_state
+
+        result = {normalize_state(value) for value in values}
+        if None in result:
+            raise ValueError("commuting states must be US state names or abbreviations")
+        return result
+
+
+class CandidateEligibilityConfig(BaseModel):
+    """Private candidate facts, independent of career-level scoring."""
+
+    model_config = ConfigDict(extra="forbid")
+    residence_state: str | None = None
+    held_professional_licenses: set[str] | None = None
+    commuting_policy: CommutingPolicy = Field(default_factory=CommutingPolicy)
+
+    @field_validator("residence_state")
+    @classmethod
+    def valid_residence(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        from .eligibility import normalize_state
+
+        normalized = normalize_state(value)
+        if normalized is None:
+            raise ValueError("residence_state must be a US state name or abbreviation")
+        return normalized
+
+    @field_validator("held_professional_licenses")
+    @classmethod
+    def clean_licenses(cls, values: set[str] | None) -> set[str] | None:
+        if values is None:
+            return None
+        from .eligibility import license_names
+
+        normalized = set()
+        for value in values:
+            names = license_names(value)
+            if len(names) != 1:
+                raise ValueError(f"Unrecognized or ambiguous professional license: {value}")
+            normalized.update(names)
+        return normalized
+
+
 class SearchPreferences(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     location_terms: list[str] = Field(default_factory=list)
     include_remote: bool = True
+    candidate_eligibility: CandidateEligibilityConfig | None = None
     exclude_citizenship_required: bool = True
     exclude_clearance_required: bool = True
     excluded_seniorities: set[Seniority] = Field(

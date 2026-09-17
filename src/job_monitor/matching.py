@@ -4,6 +4,7 @@ import html
 import re
 
 from .config import ProfileConfig, SearchPreferences
+from .eligibility import assess_candidate, work_arrangement
 from .models import (
     CandidateProfile,
     DegreeLevel,
@@ -115,7 +116,6 @@ def _clinical_review_flags(title: str, description: str) -> list[ReviewFlag]:
     return flags
 
 
-REMOTE_TERMS = ["remote", "united states - remote", "remote us", "remote, us"]
 # Explicit foreign location markers are rejected, while an unqualified
 # ``Remote``/``Home-based`` location remains eligible for broad discovery.
 FOREIGN_LOCATION_TERMS = [
@@ -303,18 +303,10 @@ def parse_job(raw: RawJob) -> ParsedJob:
     title = raw.title.lower()
     text = f" {raw.title} {raw.location_raw} {raw.description_raw} ".lower()
     requirements_text = f"{raw.title} {raw.description_raw}".lower()
-    location_text = f" {raw.location_raw.lower()} "
     level = _detect_level(title)
     seniority = SENIORITY_BY_LEVEL[level]
 
-    if _contains(location_text, REMOTE_TERMS):
-        remote_type = RemoteType.REMOTE
-    elif "hybrid" in location_text:
-        remote_type = RemoteType.HYBRID
-    elif raw.location_raw:
-        remote_type = RemoteType.ONSITE
-    else:
-        remote_type = RemoteType.UNKNOWN
+    remote_type = work_arrangement(raw)[0]
 
     if _contains(title, ["analytics engineer", "data engineer"]):
         family = "analytics_engineering"
@@ -591,7 +583,7 @@ def _years_fit(job: ParsedJob, candidate: CandidateProfile) -> float:
     return 1.0 if gap <= 0 else max(0.0, 1 - 0.18 * gap)
 
 
-def match_job(
+def _match_discovery(
     job: ParsedJob,
     profile: ProfileConfig,
     preferences: SearchPreferences,
@@ -642,7 +634,7 @@ def match_job(
             tier="filtered",
             filtered_reason="job_family",
         )
-    if not location_eligible(job, preferences):
+    if preferences.candidate_eligibility is None and not location_eligible(job, preferences):
         return MatchResult(
             profile=profile.name,
             score=0,
@@ -852,3 +844,33 @@ def match_job(
             else []
         ),
     )
+
+
+def match_job(
+    job: ParsedJob,
+    profile: ProfileConfig,
+    preferences: SearchPreferences,
+    resume: ResumeProfile | None = None,
+    *,
+    visa_sponsorship_required: bool = False,
+    company_visa_support: VisaSupport = VisaSupport.UNKNOWN,
+    candidate: CandidateProfile | None = None,
+    company_ndx_member: bool = False,
+) -> MatchResult:
+    """Keep discovery scoring intact, then enforce independent candidate facts."""
+    if preferences.candidate_eligibility is not None:
+        job = job.model_copy(update={"remote_type": work_arrangement(job.raw)[0]})
+    result = _match_discovery(
+        job, profile, preferences, resume,
+        visa_sponsorship_required=visa_sponsorship_required,
+        company_visa_support=company_visa_support,
+        candidate=candidate, company_ndx_member=company_ndx_member,
+    )
+    if preferences.candidate_eligibility is not None:
+        assessment = assess_candidate(job.raw, preferences)
+        result.discovery_eligible = result.eligible
+        result.candidate_eligibility = assessment
+        result.eligibility_reasons = assessment.hard_reasons + assessment.review_reasons
+        result.eligible = result.eligible and assessment.status == "eligible"
+        # Discovery tier, score, reasons and existing career filters remain intact.
+    return result

@@ -24,5 +24,6 @@ config/resume.md
 config/resume.*
 !config/resume.example.md
 config/candidate.yml
+config/preferences.local.yml
 cloudflare/public/
 handoff/

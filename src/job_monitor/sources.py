@@ -14,8 +14,55 @@ from pydantic import ValidationError
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from .models import AtsType, CompanyConfig, RawJob
+from .eligibility import credential_clauses
 
 logger = logging.getLogger(__name__)
+
+
+def _eligibility_metadata(item: dict) -> dict:
+    """Retain explicit ATS requirement facts otherwise lost during normalization."""
+    def texts(value):
+        if isinstance(value, str):
+            return [value]
+        if isinstance(value, list):
+            return [text for entry in value for text in texts(entry)]
+        if isinstance(value, dict):
+            return [text for key in ("name", "value", "text", "content", "addressRegion", "addressCountry")
+                    for text in texts(value.get(key))]
+        return []
+
+    facts = {}
+    credential_evidence = [clause for key in (
+        "content", "descriptionHtml", "descriptionPlain", "description", "jobDescription"
+    ) for text in texts(item.get(key)) for clause in credential_clauses(text)]
+    if credential_evidence:
+        facts["requirements"] = list(dict.fromkeys(credential_evidence))
+    for target, keys in {
+        "requirements": ("qualifications", "educationRequirements", "experienceRequirements"),
+        "required_licenses": ("requiredLicenses",),
+        "applicant_locations": ("applicantLocationRequirements",),
+    }.items():
+        values = [text for key in keys for text in texts(item.get(key))]
+        if values:
+            facts.setdefault(target, []).extend(values)
+    arrangement = item.get("workplaceType") or item.get("remoteType") or item.get("jobLocationType")
+    if not arrangement and item.get("isRemote") is True:
+        arrangement = "remote"
+    if arrangement:
+        facts["work_arrangement"] = str(arrangement)
+    for entry in item.get("metadata", []) or []:
+        if isinstance(entry, dict):
+            name = str(entry.get("name", "")).casefold()
+            value = texts(entry.get("value"))
+            if name in {"required licenses", "required professional licenses"} and value:
+                facts.setdefault("required_licenses", []).extend(value)
+            elif name in {"workplace type", "remote type", "work arrangement"} and value:
+                facts["work_arrangement"] = " ".join(value)
+    for entry in item.get("lists", []) or []:
+        if isinstance(entry, dict) and any(word in entry.get("text", "").lower()
+                                           for word in ("qualification", "requirement")):
+            facts.setdefault("requirements", []).extend(texts(entry.get("content")))
+    return {"eligibility": facts} if facts else {}
 
 
 def _parse_datetime(value: Any) -> datetime | None:
@@ -139,7 +186,7 @@ class GreenhouseSource(JobSource):
                 description_raw=_html_text(item.get("content")),
                 posted_at=_parse_datetime(item.get("updated_at")),
                 url=item_url,
-                metadata={"departments": item.get("departments", [])},
+                metadata={"departments": item.get("departments", []), **_eligibility_metadata(item)},
             )
         return jobs
 
@@ -175,7 +222,7 @@ class LeverSource(JobSource):
                 description_raw=_html_text(item.get("descriptionPlain") or item.get("description")),
                 posted_at=_parse_datetime(item.get("createdAt")),
                 url=item_url,
-                metadata={"categories": categories},
+                metadata={"categories": categories, **_eligibility_metadata(item)},
             )
         return jobs
 
@@ -211,7 +258,7 @@ class AshbySource(JobSource):
                 ),
                 posted_at=_parse_datetime(item.get("publishedAt")),
                 url=item_url,
-                metadata={"department": item.get("department")},
+                metadata={"department": item.get("department"), **_eligibility_metadata(item)},
             )
         return jobs
 
@@ -263,6 +310,7 @@ class SmartRecruitersSource(JobSource):
                     posted_at=_parse_datetime(item.get("releasedDate")),
                     url=f"https://jobs.smartrecruiters.com/{identifier}/{item_id}",
                     metadata={
+                        **_eligibility_metadata(detail),
                         "smartrecruiters": {
                             "country_code": str(location.get("country", "")).strip().lower()
                         }
@@ -343,6 +391,7 @@ class WorkdaySource(JobSource):
                         description = " ".join(str(value) for value in bullet_fields)
                     else:
                         description = str(bullet_fields)
+                    eligibility_metadata = _eligibility_metadata(item)
                     if cfg.get("detail_api_base"):
                         try:
                             detail_response = await self.client.get(
@@ -350,6 +399,7 @@ class WorkdaySource(JobSource):
                             )
                             detail_response.raise_for_status()
                             detail = detail_response.json().get("jobPostingInfo", {})
+                            eligibility_metadata.update(_eligibility_metadata(detail))
                             description = _html_text(detail.get("jobDescription") or description)
                             detail_locations = [
                                 detail.get("location"),
@@ -382,7 +432,7 @@ class WorkdaySource(JobSource):
                         description_raw=description,
                         posted_at=_parse_datetime(item.get("postedOn")),
                         url=detail_url or f"https://{site}{external_path}",
-                        metadata={"workday": item},
+                        metadata={"workday": item, **eligibility_metadata},
                     )
                 offset += len(postings)
                 if not postings:
@@ -438,7 +488,7 @@ class JsonLdSource(JobSource):
                 description_raw=_html_text(item.get("description")),
                 posted_at=_parse_datetime(item.get("datePosted")),
                 url=item.get("url") or str(self.company.careers_url),
-                metadata={"jsonld": item},
+                metadata={"jsonld": item, **_eligibility_metadata(item)},
             )
         return jobs
 

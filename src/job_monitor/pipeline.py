@@ -11,6 +11,7 @@ import httpx
 from .config import CandidateProfile, ProfileConfig, SearchPreferences, Settings
 from .llm import LLMEnricher
 from .matching import match_job, parse_job
+from .eligibility import candidate_rejections
 from .models import CompanyConfig, MatchedJob, MatchResult, ParsedJob, RawJob
 from .notifier import (
     TelegramNotifier,
@@ -44,6 +45,7 @@ class RunReport:
     jobs_new: int = 0
     jobs_changed: int = 0
     matches: int = 0
+    eligibility_reviews: int = 0
     notifications: int = 0
     immediate_candidates: int = 0
     notifications_suppressed: int = 0
@@ -103,7 +105,8 @@ class CompanyBatchPersistence:
             self.report.immediate_candidates += result.notifications_enqueued
             self.report.jobs_new += int(plan.is_new)
             self.report.jobs_changed += int(plan.changed and not plan.is_new)
-            self.report.matches += len(eligible_matches)
+            self.report.matches += sum(m.result.notification_eligible for m in eligible_matches)
+            self.report.eligibility_reviews += sum(m.result.needs_eligibility_review for m in eligible_matches)
             self.report.matched_jobs.extend(eligible_matches)
             self.jobs_new += int(plan.is_new)
             self.jobs_changed += int(plan.changed and not plan.is_new)
@@ -173,6 +176,8 @@ def _qualifies_for_immediate_notification(
     is_new: bool,
     backfill: bool = False,
 ) -> bool:
+    if not result.notification_eligible:
+        return False
     if result.bucket != "target":
         return False
     if not is_new and not backfill:
@@ -379,7 +384,7 @@ async def run_pipeline(
                                 logger.warning("LLM fallback for %s: %s", raw.title, exc)
                         matched = None
                         notification_message = None
-                        if result.eligible:
+                        if result.notification_eligible or result.needs_eligibility_review:
                             matched = MatchedJob(
                                 company_name=company.name,
                                 job=parsed,
@@ -434,7 +439,8 @@ async def run_pipeline(
                         report.immediate_candidates += persisted.notifications_enqueued
                     report.jobs_new += int(plan.is_new)
                     report.jobs_changed += int(plan.changed and not plan.is_new)
-                    report.matches += len(eligible_matches)
+                    report.matches += sum(m.result.notification_eligible for m in eligible_matches)
+                    report.eligibility_reviews += sum(m.result.needs_eligibility_review for m in eligible_matches)
                     report.matched_jobs.extend(eligible_matches)
                     if dry_run:
                         report.dry_run_matches.extend(eligible_matches)
@@ -458,13 +464,26 @@ async def run_pipeline(
             if notifier and storage:
                 pending_before_delivery = storage.pending_notification_count()
                 queued = storage.claim_pending_notifications(
-                    run_id, settings.immediate_notification_max_per_run
+                    run_id, settings.immediate_notification_max_per_run,
+                    **({"eligibility_check": lambda raw: candidate_rejections(raw, preferences)}
+                       if preferences.candidate_eligibility is not None else {}),
                 )
                 report.notifications_suppressed = max(
                     0,
                     pending_before_delivery - len(queued),
                 )
                 for item in queued:
+                    if preferences.candidate_eligibility is not None:
+                        raw = storage.notification_job(item["job_id"], item["version_hash"])
+                        rejected = (
+                            candidate_rejections(raw, preferences) if raw else
+                            ["eligibility_unknown: queued posting payload unavailable"]
+                        )
+                        if rejected:
+                            storage.release_notification_claim(
+                                run_id, item["id"], item["claim_token"], "; ".join(rejected)
+                            )
+                            continue
                     if not storage.notification_claim_is_valid(
                         run_id, item["id"], item["claim_token"]
                     ):
@@ -511,6 +530,7 @@ async def run_pipeline(
                         matched_jobs=report.matched_jobs,
                         zero_job_sources=report.zero_job_sources,
                         max_matches=settings.daily_summary_max_matches,
+                        max_reviews=settings.daily_summary_max_reviews,
                         display_timezone=settings.monitor_timezone,
                     ),
                     report,

@@ -1,8 +1,11 @@
 # Matching preferences used by every profile. Location matching is case-insensitive.
-# An empty location_terms list accepts any non-remote location.
+# With candidate eligibility enabled, an empty location_terms list approves no commute.
 preferences:
   location_terms: []
   include_remote: true
+  # Fail closed for candidate alerts when credentials/commuting facts are missing.
+  # Private overrides belong in config/preferences.local.yml (PREFERENCES_CONFIG).
+  candidate_eligibility: {}
   exclude_citizenship_required: true
   exclude_clearance_required: true
   excluded_seniorities: []

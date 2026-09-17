@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -207,6 +208,8 @@ class RawJob(BaseModel):
                 self.canonical_url,
             ]
         )
+        if self.metadata.get("eligibility"):
+            normalized += "|" + json.dumps(self.metadata["eligibility"], sort_keys=True)
         return hashlib.sha256(normalized.encode()).hexdigest()
 
 
@@ -238,6 +241,32 @@ class ReviewFlag(BaseModel):
     evidence: list[str] = Field(max_length=2)
 
 
+class AttendanceEvidence(BaseModel):
+    kind: Literal["weekly", "monthly", "occasional", "unknown"] = "unknown"
+    max_days_per_week: int | None = None
+    category: Literal["frequent", "limited", "unknown"] = "unknown"
+    conflicting: bool = False
+    physical_per_diem: bool = False
+    evidence: list[str] = Field(default_factory=list)
+
+
+class LocationEvidence(BaseModel):
+    label: str
+    status: str = "unresolved"
+    source: str = "none"
+    states: list[str] = Field(default_factory=list)
+
+
+class EligibilityAssessment(BaseModel):
+    status: Literal["eligible", "review_needed", "unsuitable"] = "eligible"
+    hard_reasons: list[str] = Field(default_factory=list)
+    review_reasons: list[str] = Field(default_factory=list)
+    work_arrangement: RemoteType = RemoteType.UNKNOWN
+    attendance: AttendanceEvidence = Field(default_factory=AttendanceEvidence)
+    locations: list[LocationEvidence] = Field(default_factory=list)
+    review_visible: bool = False
+
+
 class MatchResult(BaseModel):
     profile: str
     score: float = Field(ge=0, le=1)
@@ -248,12 +277,41 @@ class MatchResult(BaseModel):
     # Preserve existing serialized payloads (and notification claims) when there is no advice.
     review_flags: list[ReviewFlag] = Field(default_factory=list, exclude_if=lambda value: not value)
     filtered_reason: str | None = None
+    eligibility_reasons: list[str] = Field(default_factory=list, exclude_if=lambda value: not value)
+    candidate_eligibility: EligibilityAssessment | None = Field(
+        default=None, exclude_if=lambda v: v is None
+    )
+    discovery_eligible: bool | None = Field(default=None, exclude_if=lambda v: v is None)
     used_llm: bool = False
     fit: float = 0.0
     reach: float = 1.0
     bucket: str = "target"
     level: str | None = None
     required_years_min: int | None = None
+
+    @property
+    def notification_eligible(self) -> bool:
+        return (
+            self.eligible
+            and not self.eligibility_reasons
+            and (
+                self.candidate_eligibility is None
+                or (
+                    self.candidate_eligibility.status == "eligible"
+                    and not self.candidate_eligibility.hard_reasons
+                    and not self.candidate_eligibility.review_reasons
+                )
+            )
+        )
+
+    @property
+    def needs_eligibility_review(self) -> bool:
+        return bool(
+            self.discovery_eligible
+            and self.candidate_eligibility
+            and self.candidate_eligibility.status == "review_needed"
+            and not self.candidate_eligibility.hard_reasons
+        )
 
 
 class CandidateProfile(BaseModel):

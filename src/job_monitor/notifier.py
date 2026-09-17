@@ -156,8 +156,13 @@ def render_run_summary(
     matched_jobs: list[MatchedJob],
     zero_job_sources: list[str],
     max_matches: int = 8,
+    max_reviews: int = 5,
     display_timezone: str = "America/New_York",
 ) -> str:
+    reviews = [item for item in matched_jobs if item.result.needs_eligibility_review]
+    unresolved_count = sum(not item.result.candidate_eligibility.review_visible for item in reviews)
+    reviews = [item for item in reviews if item.result.candidate_eligibility.review_visible]
+    matched_jobs = [item for item in matched_jobs if item.result.notification_eligible]
     fresh_matches = sum(1 for item in matched_jobs if item.is_new)
     lines = [
         f"📊 Job Radar TW｜職缺雷達 Daily Summary - {html.escape(run_key)}",
@@ -244,6 +249,24 @@ def render_run_summary(
             )
     else:
         lines.append("本次沒有符合門檻的新/變更職缺。")
+
+    if reviews:
+        lines.extend(["", "Commute/eligibility review needed (eligibility NOT confirmed):"])
+        ordered_reviews = sorted(reviews, key=lambda item: item.result.score, reverse=True)
+        for item in ordered_reviews[:max_reviews]:
+            assessment = item.result.candidate_eligibility
+            explanation = "; ".join(assessment.review_reasons)[:450]
+            lines.append(
+                f'- {html.escape(item.company_name)} - '
+                f'<a href="{html.escape(str(item.job.raw.url), quote=True)}">{html.escape(item.job.raw.title)}</a> '
+                f'({html.escape(item.job.raw.location_raw or "Location unresolved")}; '
+                f'{assessment.work_arrangement.value}; attendance: {assessment.attendance.category}) '
+                f'{html.escape(explanation)}'
+            )
+        if len(reviews) > max_reviews:
+            lines.append(f"{len(reviews) - max_reviews} additional review records retained in match history.")
+    if unresolved_count:
+        lines.append(f"Unresolved eligibility/location: {unresolved_count} records retained for inspection; not confirmed local opportunities.")
 
     if not errors and not zero_job_sources:
         lines.append("")

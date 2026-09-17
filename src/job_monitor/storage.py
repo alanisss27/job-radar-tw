@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
@@ -1366,6 +1366,7 @@ class Storage:
         limit: int,
         *,
         stale_after_minutes: int = 15,
+        eligibility_check: Callable[[RawJob], list[str]] | None = None,
     ) -> list[dict[str, Any]]:
         if limit <= 0:
             return []
@@ -1423,7 +1424,7 @@ class Storage:
                         notification_outbox.c.score.desc(),
                         notification_outbox.c.created_at,
                     )
-                    .limit(limit)
+                    .limit(None if eligibility_check else limit)
                     .with_for_update(skip_locked=True, of=notification_outbox)
                 )
                 .mappings()
@@ -1431,6 +1432,24 @@ class Storage:
             )
             claimed: list[dict[str, Any]] = []
             for row in rows:
+                if len(claimed) >= limit:
+                    break
+                if eligibility_check is not None:
+                    payload = conn.execute(select(job_versions.c.payload).where(
+                        job_versions.c.job_id == row["job_id"],
+                        job_versions.c.content_hash == row["version_hash"],
+                    )).scalar_one_or_none()
+                    try:
+                        rejected = eligibility_check(RawJob.model_validate(payload)) if payload else [
+                            "eligibility_unknown: queued posting payload unavailable"
+                        ]
+                    except ValueError:
+                        rejected = ["eligibility_unknown: invalid queued posting payload"]
+                    if rejected:
+                        conn.execute(update(notification_outbox).where(
+                            notification_outbox.c.id == row["id"]
+                        ).values(last_error="; ".join(rejected)[:1000]))
+                        continue
                 claim_token = str(uuid.uuid4())
                 updated = conn.execute(
                     update(notification_outbox)
@@ -1455,6 +1474,15 @@ class Storage:
                     )
                     claimed.append(item)
             return claimed
+
+    def notification_job(self, job_id: str, content_hash: str) -> RawJob | None:
+        """Read the exact queued version for current candidate eligibility checks."""
+        with self.engine.connect() as conn:
+            payload = conn.execute(select(job_versions.c.payload).where(
+                job_versions.c.job_id == job_id,
+                job_versions.c.content_hash == content_hash,
+            )).scalar_one_or_none()
+        return RawJob.model_validate(payload) if payload else None
 
     def notification_claim_is_valid(self, run_id: str, outbox_id: str, claim_token: str) -> bool:
         """Recheck a claim immediately before sending an in-memory queued message."""

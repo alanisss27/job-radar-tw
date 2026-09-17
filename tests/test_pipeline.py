@@ -68,7 +68,7 @@ class FakeStorage:
             notifications_enqueued=enqueued,
         )
 
-    def claim_pending_notifications(self, run_id, limit):
+    def claim_pending_notifications(self, run_id, limit, *, eligibility_check=None):
         claimed = sorted(self.outbox, key=lambda item: item["score"], reverse=True)[:limit]
         return [dict(item, claim_token=f"claim-{item['id']}") for item in claimed]
 
