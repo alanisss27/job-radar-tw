@@ -790,16 +790,19 @@ async def test_workday_invalid_facets_fail_before_http(facets):
 
 @pytest.mark.asyncio
 @respx.mock
-async def test_parexel_enabled_us_facet_contract():
+@pytest.mark.parametrize(
+    ("slug", "facet_key"), [("parexel", "locationCountry"), ("sartorius", "Country")]
+)
+async def test_enabled_workday_us_facet_contract(slug, facet_key):
     cfg = next(
         c
         for c in load_companies(Path(__file__).resolve().parents[1] / "config/companies.yml")
-        if c.slug == "parexel"
+        if c.slug == slug
     )
     assert cfg.enabled is True
     assert cfg.source_verified is True
     assert cfg.profiles == ["clinical-discovery"]
-    facets = {"locationCountry": ["bc33aa3152ec42d4995f4791a106ed09"]}
+    facets = {facet_key: ["bc33aa3152ec42d4995f4791a106ed09"]}
     assert cfg.ats_config["applied_facets"] == facets
     # A scoped response fixture tests our request/response contract, not Workday's
     # server-side geographic classification. No client-side country filter is implied.
@@ -845,7 +848,9 @@ async def test_parexel_enabled_us_facet_contract():
     )
     async with httpx.AsyncClient() as client:
         rows = await WorkdaySource(cfg, client).fetch()
-    assert json.loads(route.calls[0].request.content)["appliedFacets"] == facets
+    request = json.loads(route.calls[0].request.content)
+    assert request["appliedFacets"] == facets
+    assert request["searchText"] == ""
     assert {r.external_job_id.rsplit("/", 1)[-1] for r in rows} == {s[0] for s in samples}
     assert not any(
         china_id in r.external_job_id for r in rows for china_id in ("R0000034848", "R0000036586")
