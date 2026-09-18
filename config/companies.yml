@@ -112,6 +112,24 @@ companies:
     priority: 2
     enabled: true
     source_verified: true
+  # Official IQVIA Workday board; U.S. listing + detail API verified 2026-09-18.
+  - slug: iqvia
+    name: IQVIA
+    careers_url: https://iqvia.wd1.myworkdayjobs.com/en-US/IQVIA
+    ats_type: workday
+    ats_config:
+      endpoint: https://iqvia.wd1.myworkdayjobs.com/wday/cxs/iqvia/IQVIA/jobs
+      site: iqvia.wd1.myworkdayjobs.com
+      detail_base_url: https://iqvia.wd1.myworkdayjobs.com/en-US/IQVIA
+      detail_api_base: https://iqvia.wd1.myworkdayjobs.com/wday/cxs/iqvia/IQVIA
+      applied_facets:
+        Location_Country:
+          - bc33aa3152ec42d4995f4791a106ed09
+    industry: clinical-services
+    profiles: [clinical-discovery]
+    priority: 2
+    enabled: true
+    source_verified: true
   - slug: fortrea
     name: Fortrea
     careers_url: https://fortrea.wd1.myworkdayjobs.com/en-US/Fortrea

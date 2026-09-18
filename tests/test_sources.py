@@ -792,7 +792,12 @@ async def test_workday_invalid_facets_fail_before_http(facets):
 @respx.mock
 @pytest.mark.parametrize(
     ("slug", "facet_key"),
-    [("parexel", "locationCountry"), ("sartorius", "Country"), ("icon", "locationCountry")],
+    [
+        ("parexel", "locationCountry"),
+        ("sartorius", "Country"),
+        ("icon", "locationCountry"),
+        ("iqvia", "Location_Country"),
+    ],
 )
 async def test_enabled_workday_us_facet_contract(slug, facet_key):
     cfg = next(
