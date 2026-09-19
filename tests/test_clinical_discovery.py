@@ -501,6 +501,7 @@ def test_discovery_configuration_and_company_scope():
         "thermo-fisher-ppd",
         "syneos-health",
         "medpace",
+        "takeda",
     }
     assert COMPANIES["nvidia"].ats_config["search_texts"] == [
         "data",
@@ -525,6 +526,19 @@ def test_fortrea_workday_source_contract_is_enabled():
         "detail_base_url": "https://fortrea.wd1.myworkdayjobs.com/en-US/Fortrea",
         "detail_api_base": "https://fortrea.wd1.myworkdayjobs.com/wday/cxs/fortrea/Fortrea",
         "applied_facets": {"locationCountry": ["bc33aa3152ec42d4995f4791a106ed09"]},
+    }
+
+
+def test_takeda_workday_us_source_contract_is_enabled():
+    company = COMPANIES["takeda"]
+    assert company.name == "Takeda Pharmaceutical"
+    assert company.enabled
+    assert company.source_verified
+    assert company.profiles == ["clinical-discovery"]
+    assert company.ats_type.value == "workday"
+    assert company.ats_config["site"] == "takeda.wd502.myworkdayjobs.com"
+    assert company.ats_config["applied_facets"] == {
+        "Location_Country": ["bc33aa3152ec42d4995f4791a106ed09"]
     }
 
 
