@@ -495,6 +495,10 @@ def test_discovery_configuration_and_company_scope():
         "parexel",
         "worldwide-clinical-trials",
         "psi-cro",
+        "icon",
+        "iqvia",
+        "sartorius",
+        "thermo-fisher-ppd",
     }
     assert COMPANIES["nvidia"].ats_config["search_texts"] == [
         "data",

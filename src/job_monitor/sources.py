@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from datetime import UTC, datetime
@@ -340,6 +341,56 @@ class WorkdaySource(JobSource):
                 "string keys to lists of nonempty string IDs"
             )
         applied_facets = dict(applied_facets)
+        # Some tenants expose locations but silently ignore country facets.
+        # Resolve configured label patterns each run instead of pinning location IDs.
+        facet_patterns = cfg.get("facet_patterns", {})
+        if not isinstance(facet_patterns, Mapping) or any(
+            not isinstance(key, str)
+            or not key.strip()
+            or not isinstance(pattern, str)
+            or not pattern.strip()
+            or key in applied_facets
+            for key, pattern in facet_patterns.items()
+        ):
+            raise SourceError(
+                "Workday facet_patterns must map distinct facet keys to regex strings"
+            )
+        try:
+            patterns = {key: re.compile(pattern) for key, pattern in facet_patterns.items()}
+        except re.error as exc:
+            raise SourceError("Invalid Workday facet pattern") from exc
+        if patterns:
+            response = await self.client.post(
+                endpoint,
+                json={"appliedFacets": {}, "limit": 1, "offset": 0, "searchText": ""},
+            )
+            response.raise_for_status()
+            payload = response.json()
+            resolved = {key: [] for key in patterns}
+
+            def collect_facets(nodes):
+                if not isinstance(nodes, list):
+                    return
+                for node in nodes:
+                    if not isinstance(node, dict):
+                        continue
+                    key = node.get("facetParameter")
+                    values = node.get("values", [])
+                    if key in patterns and isinstance(values, list):
+                        for value in values:
+                            if (
+                                isinstance(value, dict)
+                                and isinstance(value.get("descriptor"), str)
+                                and _usable_text(value.get("id"))
+                                and patterns[key].search(value["descriptor"])
+                            ):
+                                resolved[key].append(value["id"])
+                    collect_facets(values)
+
+            collect_facets(payload.get("facets") if isinstance(payload, dict) else None)
+            if any(not ids for ids in resolved.values()):
+                raise SourceError("Workday facet patterns resolved no IDs; refusing unscoped fetch")
+            applied_facets.update({key: list(dict.fromkeys(ids)) for key, ids in resolved.items()})
         limit = int(cfg.get("limit", 20))
         jobs: list[RawJob] = []
         seen: set[str] = set()

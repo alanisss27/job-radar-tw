@@ -130,6 +130,24 @@ companies:
     priority: 2
     enabled: true
     source_verified: true
+  # PPD jobs share this official Thermo Fisher Workday board (verified 2026-09-18).
+  # Country facets are ignored by this tenant; resolve current U.S. location IDs.
+  - slug: thermo-fisher-ppd
+    name: Thermo Fisher Scientific / PPD
+    careers_url: https://thermofisher.wd5.myworkdayjobs.com/en-US/ThermoFisherCareers
+    ats_type: workday
+    ats_config:
+      endpoint: https://thermofisher.wd5.myworkdayjobs.com/wday/cxs/thermofisher/ThermoFisherCareers/jobs
+      site: thermofisher.wd5.myworkdayjobs.com
+      detail_base_url: https://thermofisher.wd5.myworkdayjobs.com/en-US/ThermoFisherCareers
+      detail_api_base: https://thermofisher.wd5.myworkdayjobs.com/wday/cxs/thermofisher/ThermoFisherCareers
+      facet_patterns:
+        locations: '(?i),\s*(?:USA|United States(?: of America)?)$'
+    industry: clinical-services
+    profiles: [clinical-discovery]
+    priority: 2
+    enabled: true
+    source_verified: true
   - slug: fortrea
     name: Fortrea
     careers_url: https://fortrea.wd1.myworkdayjobs.com/en-US/Fortrea

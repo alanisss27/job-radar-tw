@@ -866,3 +866,123 @@ async def test_enabled_workday_us_facet_contract(slug, facet_key):
     assert "United States - Remote" in rows[1].location_raw
     assert "United States-New York-Remote" in rows[2].location_raw
     assert "United States - Remote" in rows[2].location_raw
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_thermo_fisher_dynamic_us_locations_and_details():
+    cfg = next(
+        c
+        for c in load_companies(Path(__file__).resolve().parents[1] / "config/companies.yml")
+        if c.slug == "thermo-fisher-ppd"
+    )
+    assert cfg.enabled and cfg.source_verified
+    assert cfg.profiles == ["clinical-discovery"]
+    cfg.ats_config["limit"] = 1
+    locations = [
+        {"id": "us-office", "descriptor": "Middleton, Wisconsin, USA"},
+        {"id": "us-remote", "descriptor": "Remote, United States of America"},
+        {"id": "my", "descriptor": "Remote, Malaysia"},
+    ]
+
+    def respond(request):
+        body = json.loads(request.content)
+        assert body["searchText"] == ""
+        if not body["appliedFacets"]:
+            return httpx.Response(
+                200,
+                json={
+                    "facets": [
+                        {
+                            "facetParameter": "locationMainGroup",
+                            "values": [{"facetParameter": "locations", "values": locations}],
+                        }
+                    ]
+                },
+            )
+        assert body["appliedFacets"] == {"locations": ["us-office", "us-remote"]}
+        i = body["offset"]
+        return httpx.Response(
+            200,
+            json={
+                "total": 2,
+                "jobPostings": [
+                    {
+                        "title": ["Clinical Trial Coordinator", "Project Coordinator"][i],
+                        "externalPath": f"/job/test/R-{i}",
+                        "locationsText": locations[i]["descriptor"],
+                    }
+                ],
+            },
+        )
+
+    route = respx.post(cfg.ats_config["endpoint"]).mock(side_effect=respond)
+    for i in range(2):
+        respx.get(cfg.ats_config["detail_api_base"] + f"/job/test/R-{i}").respond(
+            200,
+            json={
+                "jobPostingInfo": {
+                    "jobDescription": "<p>PPD clinical trial support</p>",
+                    "location": locations[i]["descriptor"],
+                    "country": {"descriptor": "United States of America"},
+                }
+            },
+        )
+    async with httpx.AsyncClient() as client:
+        rows = await WorkdaySource(cfg, client).fetch()
+    assert route.call_count == 3  # metadata request plus two filtered pages
+    assert len(rows) == 2
+    assert all(row.description_raw == "PPD clinical trial support" for row in rows)
+    assert all(str(row.url).startswith(cfg.ats_config["detail_base_url"]) for row in rows)
+
+
+@pytest.mark.asyncio
+@respx.mock
+@pytest.mark.parametrize(
+    "facets",
+    [
+        None,
+        [],
+        [
+            {
+                "facetParameter": "locations",
+                "values": [
+                    {"id": "foreign", "descriptor": "Remote, Malaysia"},
+                    {"descriptor": "Boston, USA"},
+                ],
+            }
+        ],
+    ],
+)
+async def test_workday_unresolved_facet_patterns_fail_closed(facets):
+    cfg = company(
+        "workday",
+        {
+            "endpoint": "https://example.com/jobs",
+            "site": "example.com",
+            "facet_patterns": {"locations": ", USA$"},
+            "detail_base_url": "https://example.com",
+        },
+    )
+    route = respx.post(cfg.ats_config["endpoint"]).respond(200, json={"facets": facets})
+    async with httpx.AsyncClient() as client:
+        with pytest.raises(SourceError, match="refusing unscoped"):
+            await WorkdaySource(cfg, client).fetch()
+    assert route.call_count == 1
+
+
+@pytest.mark.asyncio
+@respx.mock
+@pytest.mark.parametrize(
+    "patterns", [[], {"locations": "["}, {"locations": ""}, {"locations": ["USA"]}]
+)
+async def test_workday_invalid_facet_patterns_fail_before_http(patterns):
+    cfg = company(
+        "workday",
+        {"endpoint": "https://example.com/jobs", "site": "example.com", "facet_patterns": patterns,
+         "detail_base_url": "https://example.com"},
+    )
+    async with httpx.AsyncClient() as client:
+        with pytest.raises(SourceError):
+            await WorkdaySource(cfg, client).fetch()
+    assert not respx.calls
