@@ -499,6 +499,7 @@ def test_discovery_configuration_and_company_scope():
         "iqvia",
         "sartorius",
         "thermo-fisher-ppd",
+        "syneos-health",
     }
     assert COMPANIES["nvidia"].ats_config["search_texts"] == [
         "data",

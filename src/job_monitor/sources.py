@@ -495,6 +495,59 @@ class WorkdaySource(JobSource):
         return jobs
 
 
+class TalemetrySource(JobSource):
+    async def fetch(self) -> list[RawJob]:
+        cfg = self.company.ats_config
+        endpoint = cfg["endpoint"]
+        page = 1
+        jobs: list[RawJob] = []
+        while True:
+            payload = await self.get_json(endpoint, params={"page": page})
+            entries = payload.get("entries", []) if isinstance(payload, dict) else []
+            if not isinstance(entries, list):
+                raise SourceError(f"Talemetry response for {self.company.slug} has no entries list")
+            for item in entries:
+                if not isinstance(item, dict):
+                    _warn_skipped_item("Talemetry", self.company.slug, "not an object", item)
+                    continue
+                location = item.get("location") if isinstance(item.get("location"), dict) else {}
+                if str(location.get("country", "")).casefold() != "united states":
+                    continue
+                title = item.get("title")
+                item_id = item.get("id") or item.get("talemetry_job_id")
+                if not _usable_text(title) or item_id is None:
+                    _warn_skipped_item("Talemetry", self.company.slug, "missing title or ID", item)
+                    continue
+                detail_url = cfg["detail_base_url"].rstrip("/") + f"/{item_id}.json"
+                detail_response = await self.client.get(detail_url)
+                detail_response.raise_for_status()
+                detail_soup = BeautifulSoup(detail_response.text, "html.parser")
+                description = detail_soup.select_one(".job-details__content-description")
+                canonical = detail_soup.select_one('link[rel="canonical"]')
+                _append_raw_job(
+                    jobs,
+                    "Talemetry",
+                    self.company.slug,
+                    item,
+                    source_company=self.company.slug,
+                    external_job_id=str(item_id),
+                    title=title,
+                    location_raw=", ".join(
+                        str(location.get(key, ""))
+                        for key in ("locality", "region_abbr", "country")
+                        if location.get(key)
+                    ),
+                    description_raw=_html_text(str(description) if description else ""),
+                    posted_at=None,
+                    url=(canonical.get("href") if canonical else detail_url),
+                    metadata={"talemetry": item},
+                )
+            if not entries or len(entries) < int(payload.get("per_page", len(entries))):
+                break
+            page += 1
+        return jobs
+
+
 class JsonLdSource(JobSource):
     async def fetch(self) -> list[RawJob]:
         response = await self.client.get(str(self.company.careers_url))
@@ -550,6 +603,7 @@ SOURCE_CLASSES: dict[AtsType, type[JobSource]] = {
     AtsType.ASHBY: AshbySource,
     AtsType.SMARTRECRUITERS: SmartRecruitersSource,
     AtsType.WORKDAY: WorkdaySource,
+    AtsType.TALEMETRY: TalemetrySource,
     AtsType.JSONLD: JsonLdSource,
 }
 

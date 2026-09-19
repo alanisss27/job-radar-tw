@@ -15,6 +15,7 @@ from job_monitor.sources import (
     SmartRecruitersSource,
     SourceError,
     WorkdaySource,
+    TalemetrySource,
 )
 
 
@@ -216,6 +217,25 @@ async def test_smartrecruiters_pagination():
     assert "Dallas" in rows[0].location_raw
     assert rows[0].description_raw == "SQL"
     assert str(rows[0].url) == "https://jobs.smartrecruiters.com/acme/s"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_talemetry_filters_us_and_reads_details():
+    cfg = company("talemetry", {"endpoint": "https://example.com/jobs.json", "detail_base_url": "https://example.com/jobs"})
+    respx.get(cfg.ats_config["endpoint"], params={"page": "1"}).respond(200, json={
+        "per_page": 25,
+        "entries": [
+            {"id": "1", "title": "Clinical Data Manager", "location": {"locality": "Boston", "region_abbr": "MA", "country": "United States"}},
+            {"id": "2", "title": "Clinical Data Manager", "location": {"locality": "Toronto", "country": "Canada"}},
+        ],
+    })
+    respx.get("https://example.com/jobs/1.json").respond(200, text='<link rel="canonical" href="https://example.com/careers/1"><div class="job-details__content-description"><p>Clinical trials</p></div>')
+    async with httpx.AsyncClient() as client:
+        rows = await TalemetrySource(cfg, client).fetch()
+    assert len(rows) == 1
+    assert rows[0].location_raw == "Boston, MA, United States"
+    assert rows[0].description_raw == "Clinical trials"
 
 
 @pytest.mark.asyncio

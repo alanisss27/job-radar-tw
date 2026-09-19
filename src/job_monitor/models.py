@@ -18,6 +18,7 @@ class AtsType(StrEnum):
     ASHBY = "ashby"
     SMARTRECRUITERS = "smartrecruiters"
     WORKDAY = "workday"
+    TALEMETRY = "talemetry"
     JSONLD = "jsonld"
 
 
@@ -118,6 +119,7 @@ class CompanyConfig(BaseModel):
             AtsType.ASHBY: {"board_name"},
             AtsType.SMARTRECRUITERS: {"company_identifier"},
             AtsType.WORKDAY: {"endpoint", "site", "detail_base_url"},
+            AtsType.TALEMETRY: {"endpoint", "detail_base_url"},
             AtsType.JSONLD: set(),
         }[self.ats_type]
         missing = required - set(self.ats_config)

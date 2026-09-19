@@ -148,6 +148,18 @@ companies:
     priority: 2
     enabled: true
     source_verified: true
+  - slug: syneos-health
+    name: Syneos Health
+    careers_url: https://www.syneoshealth.com/careers/search/full-time-clinical/jobs
+    ats_type: talemetry
+    ats_config:
+      endpoint: https://www.syneoshealth.com/careers/search/full-time-clinical/jobs.json
+      detail_base_url: https://www.syneoshealth.com/careers/jobs
+    industry: clinical-services
+    profiles: [clinical-discovery]
+    priority: 2
+    enabled: true
+    source_verified: true
   - slug: fortrea
     name: Fortrea
     careers_url: https://fortrea.wd1.myworkdayjobs.com/en-US/Fortrea
