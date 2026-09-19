@@ -410,12 +410,28 @@ def _clinical_clauses(text: str) -> list[str]:
     return [" ".join(part.split()).strip() for part in re.split(r"[\n.;:]+", text) if part.strip()]
 
 
+def _clinical_transition_title(title: str) -> bool:
+    """Bounded support titles, not associate managers or monitoring occupations."""
+    return bool(
+        re.fullmatch(
+            r"(?:senior\s+|sr\.?\s+)?(?:clinical\s+study\s+(?:associate|specialist)|"
+            r"clinical\s+project\s+associate|(?:clinical\s+)?project\s+support\s+specialist|"
+            r"clinical\s+trials?\s+assistant)(?:\s*[-–—,(].*)?",
+            title.strip(), re.I,
+        )
+        and not re.search(
+            r"\b(?:manager|director|head|lead|leader|monitoring|cra|nurse)\b", title, re.I
+        )
+    )
+
+
 def _clinical_coordination_evidence(title: str, description: str) -> set[str]:
     """Find bounded human-study coordination evidence for clinical discovery."""
     lower_title = title.casefold()
     clauses = _clinical_clauses(description)
     evidence: set[str] = set()
-    if re.search(r"\bclinical\s+trials?\s+administrator\b", lower_title):
+    if (re.search(r"\bclinical\s+trials?\s+administrator\b", lower_title)
+            or _clinical_transition_title(title)):
         evidence.update(_clinical_trial_administration_evidence(title, description))
     elif re.search(r"\bresearch associate\b", lower_title):
         human = re.compile(
@@ -471,7 +487,8 @@ def _clinical_coordination_evidence(title: str, description: str) -> set[str]:
 
 
 def _clinical_trial_administration_evidence(title: str, description: str) -> set[str]:
-    if not re.search(r"\bclinical\s+trials?\s+administrator\b", title, re.I):
+    transition = _clinical_transition_title(title)
+    if not transition and not re.search(r"\bclinical\s+trials?\s+administrator\b", title, re.I):
         return set()
     clauses = _clinical_clauses(description)
     categories = {
@@ -512,6 +529,37 @@ def _clinical_trial_administration_evidence(title: str, description: str) -> set
         r"ich[- ]?gcp|gcp|clinical\s+regulatory)\b",
         re.I,
     )
+    if transition:
+        # Reuse the administration categories without changing the existing path.
+        # New variants require duties, not a title or employer boilerplate alone.
+        categories.update({
+            "meetings": re.compile(
+                categories["meetings"].pattern + r"|\bstudy\s+(?:team\s+)?meetings?\b", re.I
+            ),
+            "reporting": re.compile(
+                r"\b(?:study\s+(?:reports?|metrics)|reports?\s+and\s+metrics)\b", re.I
+            ),
+            "coordination": re.compile(
+                r"\b(?:study\s+timelines?|"
+                r"project\s+action\s+items?|project\s+plans?)\b", re.I
+            ),
+        })
+        duty = re.compile(
+            r"\b(?:(?:support|assist|maintain|track|deliver|collect|review)(?:s|ing)?|"
+            r"(?:updat|coordinat|organiz|organis|prepar|reconcil|schedul|collat)"
+            r"(?:e|es|ing))\b", re.I
+        )
+        clauses = [
+            clause for clause in clauses
+            if (action := duty.search(clause)) and any(
+                (task := pattern.search(clause)) and action.start() < task.start()
+                for pattern in categories.values()
+            )
+        ]
+        context = re.compile(
+            r"\b(?:clinical\s+(?:trials?|study|studies|research|operations|project)|"
+            r"study\s+protocol|ich[- ]?gcp|gcp)\b", re.I
+        )
     hits = {
         name: [clause for clause in clauses if pattern.search(clause)]
         for name, pattern in categories.items()
@@ -521,13 +569,15 @@ def _clinical_trial_administration_evidence(title: str, description: str) -> set
         return set()
     contextual = any(
         any(pattern.search(clause) for pattern in categories.values())
-        and any(context.search(nearby) for nearby in clauses[max(0, index - 1) : index + 2])
+        and (bool(context.search(clause)) if transition else
+             any(context.search(nearby) for nearby in clauses[max(0, index - 1) : index + 2]))
         for index, clause in enumerate(clauses)
     )
     if not contextual:
         return set()
     excerpts = [clause for name in present for clause in hits[name]]
-    return {f"clinical trial administration: {clause}" for clause in sorted(set(excerpts))[:3]}
+    label = "clinical study support" if transition else "clinical trial administration"
+    return {f"{label}: {clause}" for clause in sorted(set(excerpts))[:3]}
 
 
 def _clinical_project_support_evidence(title: str, description: str) -> set[str]:
