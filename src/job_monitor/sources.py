@@ -8,6 +8,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urljoin
 
 import httpx
 from bs4 import BeautifulSoup
@@ -539,7 +540,7 @@ class TalemetrySource(JobSource):
                     ),
                     description_raw=_html_text(str(description) if description else ""),
                     posted_at=None,
-                    url=(canonical.get("href") if canonical else detail_url),
+                    url=(urljoin(detail_url, canonical.get("href")) if canonical else detail_url),
                     metadata={"talemetry": item},
                 )
             if not entries or len(entries) < int(payload.get("per_page", len(entries))):

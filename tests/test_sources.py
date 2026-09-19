@@ -231,12 +231,13 @@ async def test_talemetry_filters_us_and_reads_details():
             {"id": "2", "title": "Clinical Data Manager", "location": {"locality": "Toronto", "country": "Canada"}},
         ],
     })
-    respx.get("https://example.com/jobs/1.json").respond(200, text='<link rel="canonical" href="https://example.com/careers/1"><div class="job-details__content-description"><p>Clinical trials</p></div>')
+    respx.get("https://example.com/jobs/1.json").respond(200, text='<link rel="canonical" href="/careers/1"><div class="job-details__content-description"><p>Clinical trials</p></div>')
     async with httpx.AsyncClient() as client:
         rows = await TalemetrySource(cfg, client).fetch()
     assert len(rows) == 1
     assert rows[0].location_raw == "Boston, MA, United States"
     assert rows[0].description_raw == "Clinical trials"
+    assert str(rows[0].url) == "https://example.com/careers/1"
 
 
 @pytest.mark.asyncio
