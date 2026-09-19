@@ -16,6 +16,7 @@ from job_monitor.sources import (
     SourceError,
     WorkdaySource,
     TalemetrySource,
+    JibeSource,
 )
 
 
@@ -236,6 +237,28 @@ async def test_talemetry_filters_us_and_reads_details():
     assert len(rows) == 1
     assert rows[0].location_raw == "Boston, MA, United States"
     assert rows[0].description_raw == "Clinical trials"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_jibe_filters_us_and_paginates():
+    cfg = company("jibe", {"endpoint": "https://example.com/api/jobs", "limit": 2})
+    endpoint = cfg.ats_config["endpoint"]
+    respx.get(endpoint, params={"page": "1", "limit": "2"}).respond(200, json={
+        "totalCount": 3,
+        "jobs": [
+            {"data": {"req_id": "1", "title": "CRA", "country_code": "US", "full_location": "Cincinnati, Ohio", "description": "<p>Trials</p>", "posted_date": "2026-09-18T12:00:00+0000", "apply_url": "https://icims.example/1"}},
+            {"data": {"req_id": "2", "title": "CRA", "country_code": "GB", "full_location": "London, UK"}},
+        ],
+    })
+    respx.get(endpoint, params={"page": "2", "limit": "2"}).respond(200, json={
+        "totalCount": 3,
+        "jobs": [{"data": {"req_id": "3", "title": "Clinical PM", "country_code": "US", "full_location": "Boston, Massachusetts", "description": "<p>Manage</p>", "apply_url": "https://icims.example/3"}}],
+    })
+    async with httpx.AsyncClient() as client:
+        rows = await JibeSource(cfg, client).fetch()
+    assert [row.external_job_id for row in rows] == ["1", "3"]
+    assert rows[0].description_raw == "Trials"
 
 
 @pytest.mark.asyncio

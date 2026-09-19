@@ -548,6 +548,51 @@ class TalemetrySource(JobSource):
         return jobs
 
 
+class JibeSource(JobSource):
+    async def fetch(self) -> list[RawJob]:
+        cfg = self.company.ats_config
+        limit = int(cfg.get("limit", 100))
+        page = 1
+        jobs: list[RawJob] = []
+        while True:
+            payload = await self.get_json(cfg["endpoint"], params={"page": page, "limit": limit})
+            entries = payload.get("jobs", []) if isinstance(payload, dict) else []
+            if not isinstance(entries, list):
+                raise SourceError(f"Jibe response for {self.company.slug} has no jobs list")
+            for wrapper in entries:
+                item = wrapper.get("data") if isinstance(wrapper, dict) else None
+                if not isinstance(item, dict):
+                    _warn_skipped_item("Jibe", self.company.slug, "missing data object", wrapper)
+                    continue
+                if str(item.get("country_code", "")).upper() != "US":
+                    continue
+                title = item.get("title")
+                item_id = item.get("req_id") or item.get("slug")
+                if not _usable_text(title) or not _usable_text(item_id):
+                    _warn_skipped_item("Jibe", self.company.slug, "missing title or ID", item)
+                    continue
+                location = item.get("full_location") or item.get("location_name") or ""
+                _append_raw_job(
+                    jobs,
+                    "Jibe",
+                    self.company.slug,
+                    item,
+                    source_company=self.company.slug,
+                    external_job_id=str(item_id),
+                    title=title,
+                    location_raw=str(location),
+                    description_raw=_html_text(item.get("description")),
+                    posted_at=_parse_datetime(item.get("posted_date")),
+                    url=item.get("apply_url") or f"{self.company.careers_url}/jobs/{item_id}",
+                    metadata={"jibe": item, **_eligibility_metadata(item)},
+                )
+            total = payload.get("totalCount") if isinstance(payload, dict) else None
+            if not entries or (isinstance(total, int) and page * limit >= total) or len(entries) < limit:
+                break
+            page += 1
+        return jobs
+
+
 class JsonLdSource(JobSource):
     async def fetch(self) -> list[RawJob]:
         response = await self.client.get(str(self.company.careers_url))
@@ -604,6 +649,7 @@ SOURCE_CLASSES: dict[AtsType, type[JobSource]] = {
     AtsType.SMARTRECRUITERS: SmartRecruitersSource,
     AtsType.WORKDAY: WorkdaySource,
     AtsType.TALEMETRY: TalemetrySource,
+    AtsType.JIBE: JibeSource,
     AtsType.JSONLD: JsonLdSource,
 }
 

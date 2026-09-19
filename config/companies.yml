@@ -160,6 +160,18 @@ companies:
     priority: 2
     enabled: true
     source_verified: true
+  - slug: medpace
+    name: Medpace
+    careers_url: https://careers.medpace.com/jobs
+    ats_type: jibe
+    ats_config:
+      endpoint: https://medpace.jibeapply.com/api/jobs
+      limit: 100
+    industry: clinical-services
+    profiles: [clinical-discovery]
+    priority: 2
+    enabled: true
+    source_verified: true
   - slug: fortrea
     name: Fortrea
     careers_url: https://fortrea.wd1.myworkdayjobs.com/en-US/Fortrea

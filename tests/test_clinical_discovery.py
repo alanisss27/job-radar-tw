@@ -500,6 +500,7 @@ def test_discovery_configuration_and_company_scope():
         "sartorius",
         "thermo-fisher-ppd",
         "syneos-health",
+        "medpace",
     }
     assert COMPANIES["nvidia"].ats_config["search_texts"] == [
         "data",
