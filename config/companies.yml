@@ -1,6 +1,26 @@
 # Registry entries are intentionally explicit. `source_verified` means a live API
 # response has been checked, not merely that the company is a desired target.
 companies:
+  # TalentBrew careers frontend links to this official Workday Careers board.
+  # Broad U.S. listing + detail API verified 2026-09-19; facet key is case-sensitive.
+  - slug: amgen
+    name: Amgen
+    careers_url: https://careers.amgen.com/
+    ats_type: workday
+    ats_config:
+      endpoint: https://amgen.wd1.myworkdayjobs.com/wday/cxs/amgen/Careers/jobs
+      site: amgen.wd1.myworkdayjobs.com
+      detail_base_url: https://amgen.wd1.myworkdayjobs.com/en-US/Careers
+      detail_api_base: https://amgen.wd1.myworkdayjobs.com/wday/cxs/amgen/Careers
+      limit: 20
+      applied_facets:
+        LocationCountry:
+          - bc33aa3152ec42d4995f4791a106ed09
+    industry: biotech
+    profiles: [clinical-discovery]
+    priority: 1
+    enabled: true
+    source_verified: true
   # Healthcare / payer — structured boards enabled for initial verification.
   - {slug: datavant, name: Datavant, careers_url: "https://boards.greenhouse.io/datavant", ats_type: greenhouse, ats_config: {board_token: datavant}, industry: healthcare, profiles: [healthcare, tech], priority: 1, enabled: false, source_verified: false}
   - {slug: komodo-health, name: Komodo Health, careers_url: "https://boards.greenhouse.io/komodohealth", ats_type: greenhouse, ats_config: {board_token: komodohealth}, industry: healthcare, profiles: [clinical-discovery], priority: 1, enabled: true, source_verified: true}

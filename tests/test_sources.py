@@ -837,6 +837,7 @@ async def test_workday_invalid_facets_fail_before_http(facets):
 @pytest.mark.parametrize(
     ("slug", "facet_key"),
     [
+        ("amgen", "LocationCountry"),
         ("parexel", "locationCountry"),
         ("sartorius", "Country"),
         ("icon", "locationCountry"),
