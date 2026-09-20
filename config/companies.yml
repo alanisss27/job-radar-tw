@@ -91,6 +91,24 @@ companies:
     priority: 1
     enabled: true
     source_verified: true
+  # Official BMS Eightfold / PCS-X board; U.S. availability is server-filtered
+  # and detail-enriched. The public API caps pages at 10 records.
+  - slug: bristol-myers-squibb
+    name: Bristol Myers Squibb
+    careers_url: https://jobs.bms.com/careers
+    ats_type: eightfold
+    ats_config:
+      search_endpoint: https://jobs.bms.com/api/pcsx/search
+      detail_endpoint: https://jobs.bms.com/api/pcsx/position_details
+      domain: bms.com
+      location: United States
+      limit: 10
+      public_job_url_template: https://jobs.bms.com/careers/job/{position_id}
+    industry: pharmaceutical
+    profiles: [clinical-discovery]
+    priority: 1
+    enabled: true
+    source_verified: true
   # Healthcare / payer — structured boards enabled for initial verification.
   - {slug: datavant, name: Datavant, careers_url: "https://boards.greenhouse.io/datavant", ats_type: greenhouse, ats_config: {board_token: datavant}, industry: healthcare, profiles: [healthcare, tech], priority: 1, enabled: false, source_verified: false}
   - {slug: komodo-health, name: Komodo Health, careers_url: "https://boards.greenhouse.io/komodohealth", ats_type: greenhouse, ats_config: {board_token: komodohealth}, industry: healthcare, profiles: [clinical-discovery], priority: 1, enabled: true, source_verified: true}

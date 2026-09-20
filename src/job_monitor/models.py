@@ -21,6 +21,7 @@ class AtsType(StrEnum):
     TALEMETRY = "talemetry"
     JIBE = "jibe"
     JSONLD = "jsonld"
+    EIGHTFOLD = "eightfold"
 
 
 class ProfileName(StrEnum):
@@ -123,6 +124,12 @@ class CompanyConfig(BaseModel):
             AtsType.TALEMETRY: {"endpoint", "detail_base_url"},
             AtsType.JIBE: {"endpoint"},
             AtsType.JSONLD: set(),
+            AtsType.EIGHTFOLD: {
+                "search_endpoint",
+                "detail_endpoint",
+                "domain",
+                "public_job_url_template",
+            },
         }[self.ats_type]
         missing = required - set(self.ats_config)
         if missing:

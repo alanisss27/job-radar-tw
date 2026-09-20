@@ -863,6 +863,150 @@ class JsonLdSource(JobSource):
         return jobs
 
 
+class EightfoldSource(JobSource):
+    """Generic public Eightfold CareerHub / PCS-X source."""
+
+    def __init__(self, company: CompanyConfig, client: httpx.AsyncClient):
+        super().__init__(company, client)
+        self.warnings: list[dict[str, str]] = []
+
+    async def fetch(self) -> list[RawJob]:
+        cfg = self.company.ats_config
+        endpoint = cfg["search_endpoint"]
+        detail_endpoint = cfg["detail_endpoint"].rstrip("/")
+        domain = cfg["domain"]
+        limit = min(int(cfg.get("limit", 10)), 10)
+        if limit <= 0:
+            raise SourceError("Eightfold page limit must be positive")
+        location = cfg.get("location", "")
+        query = cfg.get("query", "")
+        public_template = cfg["public_job_url_template"]
+        jobs: list[RawJob] = []
+        seen: set[str] = set()
+        start = 0
+        reported_total: int | None = None
+        while True:
+            payload = await self.get_json(
+                endpoint,
+                params={
+                    "domain": domain,
+                    "start": start,
+                    "num": limit,
+                    "query": query,
+                    "location": location,
+                },
+            )
+            data = payload.get("data") if isinstance(payload, dict) else None
+            positions = data.get("positions") if isinstance(data, dict) else None
+            total = data.get("count") if isinstance(data, dict) else None
+            if not isinstance(positions, list):
+                raise SourceError(
+                    f"Eightfold response for {self.company.slug} has no valid positions list"
+                )
+            if isinstance(total, int) and total >= 0:
+                reported_total = total
+            if not positions:
+                break
+            for item in positions:
+                if not isinstance(item, dict):
+                    _warn_skipped_item("Eightfold", self.company.slug, "not an object", item)
+                    continue
+                position_id = item.get("id")
+                title = item.get("name")
+                if position_id is None or not str(position_id).isdigit() or not _usable_text(title):
+                    _warn_skipped_item("Eightfold", self.company.slug, "missing ID or title", item)
+                    continue
+                key = str(position_id)
+                if key in seen:
+                    continue
+                seen.add(key)
+                public_url = public_template.format(position_id=key)
+                location_values = item.get("locations")
+                if isinstance(location_values, list):
+                    listing_locations = [str(value) for value in location_values if value is not None]
+                elif location_values is None:
+                    listing_locations = []
+                else:
+                    listing_locations = [str(location_values)]
+                warning = {
+                    "company": self.company.name,
+                    "title": str(title),
+                    "location": "; ".join(listing_locations),
+                    "reason": "detail enrichment failed",
+                    "url": public_url,
+                }
+                try:
+                    detail_payload = await self.get_json(
+                        detail_endpoint,
+                        params={"domain": domain, "position_id": key},
+                    )
+                    detail = detail_payload.get("data") if isinstance(detail_payload, dict) else None
+                    if not isinstance(detail, dict) or not _usable_text(detail.get("jobDescription")):
+                        raise ValueError("missing detail data or job description")
+                except (httpx.HTTPError, SourceError, TypeError, ValueError) as exc:
+                    warning["reason"] = f"detail enrichment failed: {type(exc).__name__}"
+                    self.warnings.append(warning)
+                    logger.error(
+                        "Excluding Eightfold posting after detail failure for %s/%s: %s",
+                        self.company.slug,
+                        key,
+                        exc,
+                    )
+                    continue
+                detail_title = detail.get("name") or title
+                detail_locations = detail.get("locations")
+                if isinstance(detail_locations, list):
+                    locations = [str(value) for value in detail_locations if value is not None]
+                elif detail_locations is None:
+                    locations = listing_locations
+                else:
+                    locations = [str(detail_locations)]
+                requisition_id = detail.get("atsJobId") or detail.get("displayJobId") or item.get("atsJobId")
+                work_location = detail.get("workLocationOption") or item.get("workLocationOption")
+                flexibility = detail.get("locationFlexibility") or item.get("locationFlexibility")
+                apply_action = (detail.get("positionUserActions") or {}).get("applyAction")
+                application_url = apply_action.get("applyUrl") if isinstance(apply_action, dict) else None
+                metadata = {
+                    "eightfold": {
+                        "position_id": detail.get("id", position_id),
+                        "display_job_id": detail.get("displayJobId") or item.get("displayJobId"),
+                        "ats_job_id": detail.get("atsJobId") or item.get("atsJobId"),
+                        "requisition_id": requisition_id,
+                        "locations": locations,
+                        "standardized_locations": detail.get("standardizedLocations")
+                        or item.get("standardizedLocations")
+                        or [],
+                        "work_location_option": work_location,
+                        "location_flexibility": flexibility,
+                        "application_url": application_url,
+                        "listing": item,
+                        "detail": detail,
+                    },
+                    **_eligibility_metadata(detail),
+                }
+                _append_raw_job(
+                    jobs,
+                    "Eightfold",
+                    self.company.slug,
+                    item,
+                    source_company=self.company.slug,
+                    external_job_id=key,
+                    title=str(detail_title),
+                    location_raw="; ".join(locations),
+                    description_raw=_html_text(detail.get("jobDescription")),
+                    posted_at=_parse_datetime(detail.get("postedTs") or item.get("postedTs")),
+                    url=public_url,
+                    metadata=metadata,
+                )
+            start += len(positions)
+            if reported_total is not None:
+                if start >= reported_total:
+                    break
+            elif len(positions) < limit:
+                break
+        return jobs
+
+
 SOURCE_CLASSES: dict[AtsType, type[JobSource]] = {
     AtsType.GREENHOUSE: GreenhouseSource,
     AtsType.LEVER: LeverSource,
@@ -872,6 +1016,7 @@ SOURCE_CLASSES: dict[AtsType, type[JobSource]] = {
     AtsType.TALEMETRY: TalemetrySource,
     AtsType.JIBE: JibeSource,
     AtsType.JSONLD: JsonLdSource,
+    AtsType.EIGHTFOLD: EightfoldSource,
 }
 
 
