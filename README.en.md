@@ -39,6 +39,18 @@ Start with these files:
 
 You can edit and commit these files in GitHub. The `weights` in each profile must add up to `1.0`. Set `source_verified: true` only after the endpoint has completed a real fetch successfully.
 
+The `clinical-discovery` profile preserves direct clinical project/study support (Path A)
+and existing explicit GxP/validation PM titles. Transferable life-science PM discovery
+(Path B) also supports bounded project coordinator, specialist and manager titles,
+including associate, scientific and operations variants, plus program/study coordinators.
+This additional path requires life-science or regulated research context in assigned work,
+not employer boilerplate, and
+affirmative duties in at least three distinct categories: planning/schedule,
+coordination/stakeholders, tracking/governance, deliverables/control, and resource/financial.
+Repeated phrases in one category do not help. Scientific or regulated terminology alone
+is insufficient; execution and advanced scientific leadership are not transition evidence.
+Discovery and strong thresholds remain 0.70 and 0.90; discovery is not candidate eligibility.
+
 With a candidate profile, matches are bucketed as target (good fit), stretch (above your current level), or unrealistic. Immediate Telegram notifications require the target bucket.
 
 Resume matching is optional. Use `config/resume.example.md` as a format reference, then save your own plain-text or Markdown resume as the repository secret `RESUME_TEXT`. Do not commit a resume containing your name, phone number, address, or other personal data. For local use, you may instead set `RESUME_PATH` in `.env`.

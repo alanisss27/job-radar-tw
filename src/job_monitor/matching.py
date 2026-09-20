@@ -633,6 +633,89 @@ def _years_fit(job: ParsedJob, candidate: CandidateProfile) -> float:
     return 1.0 if gap <= 0 else max(0.0, 1 - 0.18 * gap)
 
 
+_PM_CATEGORY_PATTERNS = {
+    "planning_schedule": r"\b(?:project (?:management )?plans?|timelines?|milestones?|project dependencies|project schedules?)\b",
+    "coordination_stakeholders": r"\b(?:(?:cross[ -]functional|stakeholder|sponsor|client|vendor|project[ -]team) coordination|coordinat\w* (?:with )?(?:cross[ -]functional (?:scientific )?(?:teams?|activities|stakeholders?)|stakeholders?|sponsors?|clients?|vendors?|project teams?))\b",
+    "tracking_governance": r"\b(?:status report\w*|report(?:s|ed|ing)? project status|(?:action[ -]item|risk|issue|status) tracking|track\w* (?:project )?(?:actions?|action items?|risks?|issues?|status)|project governance|project meeting follow[ -]up)\b",
+    "deliverables_control": r"\b(?:project deliverables?|project documentation|change control|validation coordination|regulated project documentation)\b",
+    "resource_financial": r"\b(?:resource coordination|coordinat\w* (?:project )?resources|project (?:budgets?|forecast\w*|invoicing|financial tracking))\b",
+}
+
+
+_PM_DUTY_ACTION = re.compile(
+    r"^(?:[-*•]\s*)?(?:(?:you|the role|this role|the coordinator)\s+)?"
+    r"(?:(?:will|must|is responsible for|are responsible for|responsible for|"
+    r"responsibilities include|duties include)\s+)?"
+    r"(?:(?:maintain|develop|track|support|own|lead|monitor|deliver|report)"
+    r"(?:s|ed|ing)?|(?:manag|prepar|updat|facilitat|ensur|coordinat)(?:e[sd]?|ing)|"
+    r"oversee(?:s|ing)?|oversaw|led)\s+", re.I,
+)
+_PM_WORK_DOMAIN = re.compile(
+    r"\b(?:(?:biotech(?:nology)?|pharma(?:ceutical)?s?|biopharma(?:ceutical)?s?|"
+    r"life[ -]sciences?|cro|contract research organization|clinical|gmp|gxp|glp)\s+"
+    r"(?:(?:development|operations|validation|research|scientific|quality)\s+){0,2}"
+    r"(?:projects?|operations|research|deliverables|development)|"
+    r"(?:scientific|laboratory|lab) operations|regulated research)\b", re.I,
+)
+
+
+def _transferable_pm_evidence(title: str, description: str) -> set[str]:
+    """Path B: bounded titles, credible domain, and three distinct PM categories.
+
+    This is additive to the existing clinical and explicit regulated-title paths.
+    Category evidence comes from affirmative duty clauses, never title keywords.
+    """
+    if not re.fullmatch(
+        r"(?:(?:(?:scientific|operations|gxp|gmp|validation) )?project "
+        r"(?:coordinator|specialist|manager)|associate project manager|"
+        r"(?:(?:scientific|regulated research) )?(?:program|study) coordinator)"
+        r"(?:\s*(?:[-–—,(]).*)?",
+        title.strip(), re.I,
+    ) or re.search(
+        r"\b(?:senior|sr|director|head|principal|executive|president|scientist|"
+        r"technician|engineer|engineering|medical|cra|monitoring|data management|"
+        r"statistical programming|software|construction|marketing|qa|qc|program lead)\b",
+        title, re.I,
+    ):
+        return set()
+    # Strong execution/leadership duties cannot be rescued by PM vocabulary.
+    if re.search(
+        r"\b(?:perform\w*|conduct\w*|execut\w*)\s+(?:\w+\s+){0,3}"
+        r"(?:assays?|bench experiments?|laboratory testing|site monitoring|monitoring visits|"
+        r"qc testing|statistical programming)\b|"
+        r"\b(?:principal investigator|study director|independent scientific leadership)\b",
+        description, re.I,
+    ):
+        return set()
+    categories = set()
+    work_domain = False
+    for clause in _clinical_clauses(html.unescape(description)):
+        if re.search(
+            r"\b(?:no|not|without|preferred|experience|familiarity|"
+            r"company|employer|organization|department|capability|discipline)\b",
+            clause, re.I,
+        ):
+            continue
+        action = _PM_DUTY_ACTION.match(clause)
+        if not action:
+            continue
+        # Gerunds can also name concepts ("Tracking ... is ...").
+        if re.search(
+            r"\b(?:is|are|means|refers to|includes?|involves?)\b",
+            clause[action.end():], re.I,
+        ):
+            continue
+        # One affirmative work-context clause can ground the other PM duties;
+        # employer descriptions and isolated industry nouns cannot do so.
+        if not re.search(r"\b(?:software|IT|construction|marketing)\b", clause, re.I):
+            work_domain |= bool(_PM_WORK_DOMAIN.search(clause))
+        categories.update(
+            name for name, pattern in _PM_CATEGORY_PATTERNS.items()
+            if re.search(pattern, clause, re.I)
+        )
+    return categories if work_domain and len(categories) >= 3 else set()
+
+
 def _match_discovery(
     job: ParsedJob,
     profile: ProfileConfig,
@@ -744,14 +827,20 @@ def _match_discovery(
     )
     clinical_coordination_hits: set[str] = set()
     clinical_project_support_hits: set[str] = set()
+    transferable_pm_hits: set[str] = set()
     if profile.name == "clinical-discovery":
+        transferable_pm_hits = _transferable_pm_evidence(
+            job.raw.title, job.raw.description_raw
+        )
         clinical_coordination_hits = _clinical_coordination_evidence(
             job.raw.title, job.raw.description_raw
         )
         clinical_project_support_hits = _clinical_project_support_evidence(
             job.raw.title, job.raw.description_raw
         )
-    bounded_discovery_hit = bool(clinical_coordination_hits or clinical_project_support_hits)
+    bounded_discovery_hit = bool(
+        clinical_coordination_hits or clinical_project_support_hits or transferable_pm_hits
+    )
     if (
         profile.allow_other_job_family
         and not title_hit
@@ -827,6 +916,8 @@ def _match_discovery(
         reasons.append(
             "clinical project support: " + " | ".join(sorted(clinical_project_support_hits))
         )
+    if transferable_pm_hits:
+        reasons.append("transferable life-science PM: " + ", ".join(sorted(transferable_pm_hits)))
     gaps = []
     penalty = 0.0
     if candidate:
