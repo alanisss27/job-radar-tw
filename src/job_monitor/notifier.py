@@ -153,12 +153,14 @@ def render_run_summary(
     run_key: str,
     stats: dict[str, int],
     errors: list[dict[str, str]],
+    source_warnings: list[dict[str, str]] | None = None,
     matched_jobs: list[MatchedJob],
     zero_job_sources: list[str],
     max_matches: int = 8,
     max_reviews: int = 5,
     display_timezone: str = "America/New_York",
 ) -> str:
+    source_warnings = source_warnings or []
     reviews = [item for item in matched_jobs if item.result.needs_eligibility_review]
     unresolved_reviews = [
         item for item in reviews if not item.result.candidate_eligibility.review_visible
@@ -190,6 +192,21 @@ def render_run_summary(
             company = html.escape(item.get("company", "unknown"))
             error = html.escape(item.get("error", "")[:160])
             lines.append(f"- {company}: {error}")
+
+    if source_warnings:
+        lines.append("")
+        lines.append("Source warnings:")
+        for item in source_warnings[:8]:
+            company = html.escape(item.get("company", "unknown"))
+            title = html.escape(item.get("title", "Title unavailable"))
+            location = html.escape(item.get("location", ""))
+            reason = html.escape(item.get("reason", "detail validation failed"))
+            location_text = f"; {location}" if location else ""
+            line = f"- {company}: 1 posting excluded after Workday detail validation ({title}{location_text}; {reason})"
+            url = item.get("url", "")
+            if url:
+                line += f' <a href="{html.escape(url, quote=True)}">Official posting</a>'
+            lines.append(line)
 
     lines.append("")
     if matched_jobs:

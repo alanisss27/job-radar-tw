@@ -1,3 +1,4 @@
+import asyncio
 import json
 from copy import deepcopy
 from pathlib import Path
@@ -14,7 +15,10 @@ from job_monitor.sources import (
     LeverSource,
     SmartRecruitersSource,
     SourceError,
+    WorkdayRequestController,
+    WorkdayRequestError,
     WorkdaySource,
+    SourceRunner,
     TalemetrySource,
     JibeSource,
 )
@@ -1031,3 +1035,237 @@ async def test_workday_invalid_facet_patterns_fail_before_http(patterns):
         with pytest.raises(SourceError):
             await WorkdaySource(cfg, client).fetch()
     assert not respx.calls
+
+
+@pytest.mark.asyncio
+async def test_workday_request_retries_429_then_succeeds(monkeypatch):
+    controller = WorkdayRequestController(concurrency=1, min_interval_seconds=0)
+    attempts = 0
+    sleeps = []
+
+    async def fake_sleep(delay):
+        sleeps.append(delay)
+
+    monkeypatch.setattr("job_monitor.sources.asyncio.sleep", fake_sleep)
+
+    async def handler(request):
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(429 if attempts == 1 else 200, request=request)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        response = await controller.request(client, "POST", "https://example.test/jobs")
+    assert response.status_code == 200
+    assert attempts == 2
+    assert len(sleeps) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("retry_after,expected", [("2", 2.0), ("999", 30.0)])
+async def test_workday_retry_after_is_honored_and_capped(monkeypatch, retry_after, expected):
+    controller = WorkdayRequestController(concurrency=1, min_interval_seconds=0)
+    sleeps = []
+
+    async def fake_sleep(delay):
+        sleeps.append(delay)
+
+    monkeypatch.setattr("job_monitor.sources.asyncio.sleep", fake_sleep)
+    calls = 0
+
+    async def handler(request):
+        nonlocal calls
+        calls += 1
+        return httpx.Response(
+            429 if calls == 1 else 200,
+            headers={"Retry-After": retry_after},
+            request=request,
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        await controller.request(client, "GET", "https://example.test/detail")
+    assert sleeps == [expected]
+
+
+@pytest.mark.asyncio
+async def test_workday_missing_retry_after_uses_bounded_jittered_backoff(monkeypatch):
+    controller = WorkdayRequestController(concurrency=1, min_interval_seconds=0)
+    sleeps = []
+    monkeypatch.setattr("job_monitor.sources.random.uniform", lambda *_: 0.1)
+
+    async def fake_sleep(delay):
+        sleeps.append(delay)
+
+    monkeypatch.setattr("job_monitor.sources.asyncio.sleep", fake_sleep)
+    calls = 0
+
+    async def handler(request):
+        nonlocal calls
+        calls += 1
+        return httpx.Response(503 if calls < 3 else 200, request=request)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        await controller.request(client, "GET", "https://example.test/detail")
+    assert sleeps == [0.6, 1.1]
+    assert all(0 <= delay <= controller.max_backoff_seconds for delay in sleeps)
+
+
+@pytest.mark.asyncio
+async def test_workday_persistent_429_and_permanent_4xx_are_transparent(monkeypatch):
+    controller = WorkdayRequestController(concurrency=1, min_interval_seconds=0)
+    async def no_sleep(*_):
+        return None
+
+    monkeypatch.setattr("job_monitor.sources.asyncio.sleep", no_sleep)
+    calls = 0
+
+    async def persistent(request):
+        nonlocal calls
+        calls += 1
+        return httpx.Response(429, request=request)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(persistent)) as client:
+        with pytest.raises(WorkdayRequestError, match="HTTP 429"):
+            await controller.request(client, "POST", "https://example.test/jobs")
+    assert calls == controller.max_attempts
+
+    calls = 0
+
+    async def permanent(request):
+        nonlocal calls
+        calls += 1
+        return httpx.Response(400, request=request)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(permanent)) as client:
+        with pytest.raises(httpx.HTTPStatusError):
+            await controller.request(client, "POST", "https://example.test/jobs")
+    assert calls == 1
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_workday_listing_and_detail_both_use_shared_retry_path():
+    cfg = company(
+        "workday",
+        {"endpoint": "https://example.com/jobs", "site": "example.com",
+         "detail_base_url": "https://example.com/careers",
+         "detail_api_base": "https://example.com/careers"},
+    )
+    listing = respx.post(cfg.ats_config["endpoint"]).mock(side_effect=[
+        httpx.Response(429),
+        httpx.Response(200, json={"total": 1, "jobPostings": [{
+            "externalPath": "/job/1", "title": "Clinical Project Coordinator",
+        }]}),
+    ])
+    detail = respx.get(cfg.ats_config["detail_base_url"] + "/job/1").mock(side_effect=[
+        httpx.Response(429),
+        httpx.Response(200, json={"jobPostingInfo": {
+            "jobDescription": "<p>Coordinate clinical trials.</p>",
+        }}),
+    ])
+    async with httpx.AsyncClient() as client:
+        jobs = await WorkdaySource(cfg, client).fetch()
+    assert len(jobs) == 1
+    assert listing.call_count == 2
+    assert detail.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_concurrent_workday_requests_share_bounded_controller():
+    controller = WorkdayRequestController(concurrency=2, min_interval_seconds=0)
+    active = 0
+    maximum = 0
+
+    async def handler(request):
+        nonlocal active, maximum
+        active += 1
+        maximum = max(maximum, active)
+        await asyncio.sleep(0)
+        active -= 1
+        return httpx.Response(200, request=request)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        await asyncio.gather(*(
+            controller.request(client, "POST", f"https://example.test/{index}")
+            for index in range(8)
+        ))
+    assert maximum <= 2
+
+
+@pytest.mark.asyncio
+async def test_source_runner_shares_workday_limiter_but_not_for_greenhouse():
+    active = 0
+    maximum = 0
+
+    async def handler(request):
+        nonlocal active, maximum
+        active += 1
+        maximum = max(maximum, active)
+        await asyncio.sleep(0)
+        active -= 1
+        if request.url.host == "greenhouse.test":
+            return httpx.Response(200, json={"jobs": []}, request=request)
+        return httpx.Response(200, json={"total": 0, "jobPostings": []}, request=request)
+
+    workday_one = company(
+        "workday",
+        {"endpoint": "https://workday-one.test/jobs", "site": "workday-one.test",
+         "detail_base_url": "https://workday-one.test/careers"},
+    )
+    workday_two = company(
+        "workday",
+        {"endpoint": "https://workday-two.test/jobs", "site": "workday-two.test",
+         "detail_base_url": "https://workday-two.test/careers"},
+    )
+    greenhouse = company(
+        "greenhouse",
+        {"board_token": "acme"},
+    ).model_copy(update={"careers_url": "https://greenhouse.test/jobs"})
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        runner = SourceRunner(client, max_concurrency=5)
+        await asyncio.gather(runner.fetch(workday_one), runner.fetch(workday_two))
+        assert await runner.fetch(greenhouse) == []
+    assert maximum <= 2
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_validated_workday_exclusion_returns_other_jobs_and_warning():
+    cfg = company(
+        "workday",
+        {
+            "endpoint": "https://example.com/jobs",
+            "site": "example.com",
+            "detail_base_url": "https://example.com/careers",
+            "detail_api_base": "https://example.com/careers",
+            "facet_patterns": {"locations": "United States"},
+            "validate_location_facets": True,
+        },
+    )
+    respx.post(cfg.ats_config["endpoint"]).mock(side_effect=[
+        httpx.Response(200, json={"facets": [{"facetParameter": "locations", "values": [
+            {"id": "us", "descriptor": "United States"},
+        ]}]}),
+        httpx.Response(200, json={"total": 2, "jobPostings": [
+            {"externalPath": "/job/bad", "title": "Excluded Study Associate"},
+            {"externalPath": "/job/good", "title": "Valid Study Associate"},
+        ]}),
+    ])
+    respx.get(cfg.ats_config["detail_api_base"] + "/job/bad").mock(
+        side_effect=[httpx.Response(503), httpx.Response(503), httpx.Response(503)]
+    )
+    respx.get(cfg.ats_config["detail_api_base"] + "/job/good").mock(
+        return_value=httpx.Response(200, json={"jobPostingInfo": {
+            "location": "United States",
+            "additionalLocations": [],
+            "jobDescription": "Study operations",
+        }})
+    )
+    async with httpx.AsyncClient() as client:
+        source = WorkdaySource(cfg, client)
+        jobs = await source.fetch()
+    assert [job.raw.title if hasattr(job, "raw") else job.title for job in jobs] == [
+        "Valid Study Associate"
+    ]
+    assert len(source.warnings) == 1
+    assert source.warnings[0]["title"] == "Excluded Study Associate"
+    assert "detail request failed" in source.warnings[0]["reason"]

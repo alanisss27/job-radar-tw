@@ -134,7 +134,7 @@ async def test_scoped_pagination_deduplication_and_mixed_primary_locations():
     ({}, 200),
     ({}, 503),
 ])
-async def test_ignored_scope_missing_or_failed_details_fail_closed(detail, status):
+async def test_ignored_scope_missing_or_failed_details_fail_closed(detail, status, caplog):
     cfg = COMPANY.ats_config
     respx.post(cfg["endpoint"]).mock(side_effect=[
         httpx.Response(200, json={"facets": facets()}),
@@ -147,8 +147,35 @@ async def test_ignored_scope_missing_or_failed_details_fail_closed(detail, statu
         status, json={"jobPostingInfo": detail},
     )
     async with httpx.AsyncClient() as client:
-        with pytest.raises(SourceError):
-            await WorkdaySource(COMPANY, client).fetch()
+        jobs = await WorkdaySource(COMPANY, client).fetch()
+    assert jobs == []
+    assert "Excluding Workday posting" in caplog.text
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_persistent_detail_failure_excludes_only_one_regeneron_posting(caplog):
+    cfg = COMPANY.ats_config
+    respx.post(cfg["endpoint"]).mock(side_effect=[
+        httpx.Response(200, json={"facets": facets()}),
+        httpx.Response(200, json={"total": 2, "jobPostings": [
+            {"externalPath": "/job/R-good", "title": "Clinical Study Specialist"},
+            {"externalPath": "/job/R-bad", "title": "Clinical Study Associate"},
+        ]}),
+    ])
+    respx.get(cfg["detail_api_base"] + "/job/R-good").respond(
+        200, json={"jobPostingInfo": {
+            "location": "TARRYTOWN", "additionalLocations": [],
+            "country": {"descriptor": "United States of America"},
+            "jobDescription": "<p>Support clinical study team updates.</p>",
+        }},
+    )
+    respx.get(cfg["detail_api_base"] + "/job/R-bad").respond(503)
+    async with httpx.AsyncClient() as client:
+        jobs = await WorkdaySource(COMPANY, client).fetch()
+    assert [job.external_job_id for job in jobs] == ["/job/R-good"]
+    assert "R-bad" in caplog.text
+    assert "HTTP 503" in caplog.text
 
 
 @pytest.mark.asyncio

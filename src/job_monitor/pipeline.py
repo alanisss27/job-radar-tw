@@ -52,6 +52,7 @@ class RunReport:
     notifications_pending: int = 0
     jobs_closed: int = 0
     errors: list[dict[str, str]] = field(default_factory=list)
+    source_warnings: list[dict[str, str]] = field(default_factory=list)
     matched_jobs: list[MatchedJob] = field(default_factory=list)
     dry_run_matches: list[MatchedJob] = field(default_factory=list)
     zero_job_sources: list[str] = field(default_factory=list)
@@ -136,6 +137,7 @@ class CompanyRunContext:
 class SourceFetchResult:
     context: CompanyRunContext
     raw_jobs: list[RawJob]
+    warnings: list[dict[str, str]] = field(default_factory=list)
     error: Exception | None = None
 
 
@@ -162,7 +164,11 @@ async def _fetch_company_source(
     context: CompanyRunContext,
 ) -> SourceFetchResult:
     try:
-        return SourceFetchResult(context=context, raw_jobs=await runner.fetch(context.company))
+        if hasattr(runner, "fetch_with_warnings"):
+            raw_jobs, warnings = await runner.fetch_with_warnings(context.company)
+        else:  # compatibility for lightweight test/dry-run runners
+            raw_jobs, warnings = await runner.fetch(context.company), []
+        return SourceFetchResult(context=context, raw_jobs=raw_jobs, warnings=warnings)
     except Exception as exc:
         return SourceFetchResult(context=context, raw_jobs=[], error=exc)
 
@@ -290,6 +296,7 @@ async def run_pipeline(
                     continue
 
                 raw_jobs = source_result.raw_jobs
+                report.source_warnings.extend(source_result.warnings)
                 report.jobs_fetched += len(raw_jobs)
                 if company.source_verified and not raw_jobs:
                     report.zero_job_sources.append(company.name)
@@ -527,6 +534,7 @@ async def run_pipeline(
                         run_key=report.run_key,
                         stats=report.stats(),
                         errors=report.errors,
+                        source_warnings=report.source_warnings,
                         matched_jobs=report.matched_jobs,
                         zero_job_sources=report.zero_job_sources,
                         max_matches=settings.daily_summary_max_matches,

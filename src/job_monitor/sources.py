@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import email.utils
 import json
 import logging
+import random
 import re
+import time
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from datetime import UTC, datetime
@@ -134,6 +137,90 @@ def _append_raw_job(
 
 class SourceError(RuntimeError):
     pass
+
+
+class WorkdayRequestError(SourceError):
+    """A bounded Workday request retry budget was exhausted."""
+
+    def __init__(self, method: str, url: str, status_code: int | None, reason: str | None = None):
+        self.method = method
+        self.url = url
+        self.status_code = status_code
+        detail = f"HTTP {status_code}" if status_code is not None else (reason or "transport error")
+        super().__init__(f"Workday {method} {url} failed after retries with {detail}")
+
+
+class WorkdayLocationValidationError(SourceError):
+    """A single Workday detail lacked validated scope evidence."""
+
+
+class WorkdayRequestController:
+    """Small shared limiter/retry policy for concurrent Workday tenants."""
+
+    transient_statuses = frozenset({429, 500, 502, 503, 504})
+    max_attempts = 3
+    max_retry_after_seconds = 30.0
+    base_backoff_seconds = 0.5
+    max_backoff_seconds = 8.0
+
+    def __init__(self, concurrency: int = 2, min_interval_seconds: float = 0.15):
+        self.semaphore = asyncio.Semaphore(concurrency)
+        self.pacing_lock = asyncio.Lock()
+        self.min_interval_seconds = min_interval_seconds
+        self.next_request_at = 0.0
+
+    @classmethod
+    def _retry_after(cls, response: httpx.Response) -> float | None:
+        value = response.headers.get("Retry-After")
+        if not value:
+            return None
+        try:
+            return min(cls.max_retry_after_seconds, max(0.0, float(value)))
+        except ValueError:
+            try:
+                target = email.utils.parsedate_to_datetime(value)
+                delay = target.timestamp() - time.time()
+                return min(cls.max_retry_after_seconds, max(0.0, delay))
+            except (TypeError, ValueError, OverflowError):
+                return None
+
+    @classmethod
+    def _backoff(cls, attempt: int) -> float:
+        base = min(cls.max_backoff_seconds, cls.base_backoff_seconds * (2**attempt))
+        return min(cls.max_backoff_seconds, base + random.uniform(0.0, 0.25))
+
+    async def _pace(self) -> None:
+        async with self.pacing_lock:
+            now = time.monotonic()
+            delay = max(0.0, self.next_request_at - now)
+            self.next_request_at = max(now, self.next_request_at) + self.min_interval_seconds
+        if delay:
+            await asyncio.sleep(delay)
+
+    async def request(self, client: httpx.AsyncClient, method: str, url: str, **kwargs: Any):
+        for attempt in range(self.max_attempts):
+            await self._pace()
+            try:
+                # Hold the Workday permit only while the HTTP request is in flight.
+                async with self.semaphore:
+                    response = await client.request(method, url, **kwargs)
+            except httpx.TransportError as exc:
+                if attempt + 1 >= self.max_attempts:
+                    raise WorkdayRequestError(
+                        method, url, None, f"{type(exc).__name__}: {exc}"
+                    ) from exc
+                await asyncio.sleep(self._backoff(attempt))
+                continue
+            if response.status_code not in self.transient_statuses:
+                response.raise_for_status()
+                return response
+            delay = self._retry_after(response)
+            if attempt + 1 >= self.max_attempts:
+                await response.aclose()
+                raise WorkdayRequestError(method, url, response.status_code)
+            await response.aclose()
+            await asyncio.sleep(delay if delay is not None else self._backoff(attempt))
+        raise AssertionError("unreachable")
 
 
 class JobSource(ABC):
@@ -325,6 +412,28 @@ class SmartRecruitersSource(JobSource):
 
 
 class WorkdaySource(JobSource):
+    def __init__(
+        self,
+        company: CompanyConfig,
+        client: httpx.AsyncClient,
+        request_controller: WorkdayRequestController | None = None,
+    ):
+        super().__init__(company, client)
+        self.request_controller = request_controller or WorkdayRequestController()
+        self.warnings: list[dict[str, str]] = []
+
+    def _record_exclusion(self, item: Mapping[str, Any], title: str, path: str, reason: str) -> None:
+        self.warnings.append({
+            "company": self.company.name,
+            "title": str(title),
+            "location": str(item.get("locationsText") or ""),
+            "reason": reason,
+            "url": self.company.ats_config.get("detail_base_url", "").rstrip("/") + path,
+        })
+
+    async def _request(self, method: str, url: str, **kwargs: Any):
+        return await self.request_controller.request(self.client, method, url, **kwargs)
+
     async def fetch(self) -> list[RawJob]:
         cfg = self.company.ats_config
         endpoint = cfg["endpoint"]
@@ -367,11 +476,11 @@ class WorkdaySource(JobSource):
         if facet_country is not None and (not validate_locations or not _usable_text(facet_country)):
             raise SourceError("Workday location_facet_country requires validated location facets")
         if patterns:
-            response = await self.client.post(
+            response = await self._request(
+                "POST",
                 endpoint,
                 json={"appliedFacets": {}, "limit": 1, "offset": 0, "searchText": ""},
             )
-            response.raise_for_status()
             payload = response.json()
             resolved = {key: [] for key in patterns}
 
@@ -406,7 +515,8 @@ class WorkdaySource(JobSource):
             offset = 0
             reported_total: int | None = None
             while True:
-                response = await self.client.post(
+                response = await self._request(
+                    "POST",
                     endpoint,
                     json={
                         "appliedFacets": applied_facets,
@@ -415,7 +525,6 @@ class WorkdaySource(JobSource):
                         "searchText": search_text,
                     },
                 )
-                response.raise_for_status()
                 payload = response.json()
                 if not isinstance(payload, dict) or not isinstance(
                     payload.get("jobPostings"), list
@@ -453,10 +562,9 @@ class WorkdaySource(JobSource):
                     location_metadata = {}
                     if cfg.get("detail_api_base"):
                         try:
-                            detail_response = await self.client.get(
-                                cfg["detail_api_base"].rstrip("/") + external_path
+                            detail_response = await self._request(
+                                "GET", cfg["detail_api_base"].rstrip("/") + external_path
                             )
-                            detail_response.raise_for_status()
                             detail = detail_response.json().get("jobPostingInfo", {})
                             if validate_locations:
                                 primary = detail.get("location")
@@ -468,7 +576,7 @@ class WorkdaySource(JobSource):
                                     or not any(patterns["locations"].search(value)
                                                for value in [primary, *additional])
                                 ):
-                                    raise SourceError(
+                                    raise WorkdayLocationValidationError(
                                         "Workday detail does not confirm scoped location for "
                                         f"{self.company.slug}{external_path}"
                                     )
@@ -477,7 +585,7 @@ class WorkdaySource(JobSource):
                                 primary_country = (detail.get("country") or {}).get("descriptor")
                                 if (facet_country and not scoped_additional
                                         and primary_country != facet_country):
-                                    raise SourceError(
+                                    raise WorkdayLocationValidationError(
                                         "Workday primary country does not confirm location facet "
                                         f"for {self.company.slug}{external_path}"
                                     )
@@ -521,16 +629,68 @@ class WorkdaySource(JobSource):
                                     value.casefold() for value in location_parts if value
                                 }:
                                     location_parts.append(location)
+                        except WorkdayRequestError as exc:
+                            if validate_locations:
+                                self._record_exclusion(item, title, external_path, "detail request failed after retries")
+                                logger.error(
+                                    "Excluding Workday posting after detail request failure "
+                                    "for %s%s: %s",
+                                    self.company.slug,
+                                    external_path,
+                                    exc,
+                                )
+                                continue
+                            logger.warning(
+                                "Unable to enrich Workday detail for %s%s; using listing fields: %s",
+                                self.company.slug,
+                                external_path,
+                                exc,
+                            )
+                        except WorkdayLocationValidationError as exc:
+                            if validate_locations:
+                                self._record_exclusion(item, title, external_path, "location validation failed")
+                                logger.error(
+                                    "Excluding Workday posting after location validation failure "
+                                    "for %s%s: %s",
+                                    self.company.slug,
+                                    external_path,
+                                    exc,
+                                )
+                                continue
+                            raise
+                        except httpx.HTTPStatusError as exc:
+                            if validate_locations:
+                                self._record_exclusion(item, title, external_path, "detail HTTP failure")
+                                logger.error(
+                                    "Excluding Workday posting after detail HTTP failure "
+                                    "for %s%s: %s",
+                                    self.company.slug,
+                                    external_path,
+                                    exc,
+                                )
+                                continue
+                            logger.warning(
+                                "Unable to enrich Workday detail for %s%s; using listing fields: %s",
+                                self.company.slug,
+                                external_path,
+                                exc,
+                            )
                         except (httpx.HTTPError, ValueError, TypeError, AttributeError) as exc:
                             if validate_locations:
-                                raise SourceError(
-                                    "Unable to validate Workday scoped location for "
-                                    f"{self.company.slug}{external_path}"
-                                ) from exc
+                                self._record_exclusion(item, title, external_path, "detail evidence malformed or unavailable")
+                                logger.error(
+                                    "Excluding Workday posting after detail validation failure "
+                                    "for %s%s: %s",
+                                    self.company.slug,
+                                    external_path,
+                                    exc,
+                                )
+                                continue
                             logger.warning(
                                 "Unable to enrich Workday detail for %s%s; using listing fields",
                                 self.company.slug,
                                 external_path,
+                                exc,
                             )
                     _append_raw_job(
                         jobs,
@@ -720,10 +880,19 @@ class SourceRunner:
         self.client = client
         self.semaphore = asyncio.Semaphore(max_concurrency)
         self.domain_locks: dict[str, asyncio.Lock] = {}
+        self.workday_controller = WorkdayRequestController()
 
-    async def fetch(self, company: CompanyConfig) -> list[RawJob]:
+    async def fetch_with_warnings(self, company: CompanyConfig) -> tuple[list[RawJob], list[dict[str, str]]]:
         domain = httpx.URL(str(company.careers_url)).host or company.slug
         lock = self.domain_locks.setdefault(domain, asyncio.Lock())
         async with self.semaphore, lock:
-            source = SOURCE_CLASSES[company.ats_type](company, self.client)
-            return await source.fetch()
+            if company.ats_type is AtsType.WORKDAY:
+                source = WorkdaySource(company, self.client, self.workday_controller)
+            else:
+                source = SOURCE_CLASSES[company.ats_type](company, self.client)
+            jobs = await source.fetch()
+            return jobs, list(getattr(source, "warnings", []))
+
+    async def fetch(self, company: CompanyConfig) -> list[RawJob]:
+        jobs, _warnings = await self.fetch_with_warnings(company)
+        return jobs

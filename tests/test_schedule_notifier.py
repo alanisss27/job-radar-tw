@@ -17,6 +17,32 @@ from job_monitor.pipeline import _qualifies_for_immediate_notification
 from job_monitor.schedule import is_scheduled_window, local_run_key, scheduled_run_key
 
 
+def test_summary_shows_structured_source_warnings_only_when_present():
+    kwargs = dict(
+        run_key="daily-test",
+        stats={"sources_succeeded": 1, "sources_attempted": 1, "jobs_fetched": 1},
+        errors=[],
+        matched_jobs=[],
+        zero_job_sources=[],
+    )
+    plain = render_run_summary(**kwargs)
+    assert "Source warnings:" not in plain
+    summary = render_run_summary(
+        **kwargs,
+        source_warnings=[{
+            "company": "Regeneron",
+            "title": "Study Associate",
+            "reason": "detail request failed after retries",
+            "url": "https://example.test/job/1",
+        }],
+    )
+    assert "Source warnings:" in summary
+    assert "Regeneron" in summary
+    assert "Study Associate" in summary
+    assert "detail request failed after retries" in summary
+    assert "https://example.test/job/1" in summary
+
+
 def test_et_schedule_handles_dst():
     assert is_scheduled_window(datetime(2026, 6, 18, 0, 0, tzinfo=UTC))
     assert is_scheduled_window(datetime(2026, 1, 18, 1, 0, tzinfo=UTC))
