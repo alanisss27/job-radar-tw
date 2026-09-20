@@ -632,8 +632,50 @@ def test_review_summary_is_capped_separate_and_does_not_leak_unsuitable():
     assert postings[0].title in normal
     assert postings[1].title not in normal and postings[1].title in review
     assert postings[2].title not in message and "1 additional review records" in message
-    assert postings[3].title not in message and "Unresolved eligibility/location: 1" in message
+    assert postings[3].title in message and "Unresolved eligibility/location: 1" in message
+    assert "Location unavailable" in message
+    assert "https://example.com/jobs/eligibility" in message
     assert postings[4].title not in message
+
+
+def test_unresolved_summary_keeps_multiple_records_out_of_confirmed_sections():
+    now = datetime.now(UTC)
+    postings = [
+        raw(title="Clinical Research Coordinator Unresolved One", location=""),
+        raw(title="Clinical Research Coordinator Unresolved Two", location="Unknown location"),
+    ]
+    matches = []
+    for posting in postings:
+        result = match_job(parse_job(posting), PROFILE, preferences())
+        matches.append(MatchedJob("Acme", parse_job(posting), result, now, True, False))
+    message = render_run_summary(
+        run_key="unresolved", stats={}, errors=[], matched_jobs=matches, zero_job_sources=[]
+    )
+    assert "Unresolved eligibility/location: 2" in message
+    assert "Retained unresolved records (not confirmed local opportunities):" in message
+    for title in ("Clinical Research Coordinator Unresolved One", "Clinical Research Coordinator Unresolved Two"):
+        assert message.count(title) == 1
+    assert "Commute/eligibility review needed" not in message
+    assert "Official posting" in message
+    assert all(not item.result.notification_eligible for item in matches)
+
+
+def test_unresolved_summary_handles_missing_optional_display_fields():
+    now = datetime.now(UTC)
+    job = parse_job(raw(title="Clinical Research Coordinator Missing Details", location=""))
+    job.raw.location_raw = ""
+    job.raw.url = None
+    result = match_job(job, PROFILE, preferences())
+    result.candidate_eligibility.review_reasons = []
+    item = MatchedJob("", job, result, now, True, False)
+    message = render_run_summary(
+        run_key="missing", stats={}, errors=[], matched_jobs=[item], zero_job_sources=[]
+    )
+    assert "Company unavailable" in message
+    assert "Title unavailable" not in message
+    assert "Location unavailable" in message
+    assert "Eligibility/location unresolved" in message
+    assert "Official posting" not in message
 
 
 def test_low_discovery_relevance_does_not_enter_review_section():

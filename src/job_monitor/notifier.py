@@ -160,7 +160,10 @@ def render_run_summary(
     display_timezone: str = "America/New_York",
 ) -> str:
     reviews = [item for item in matched_jobs if item.result.needs_eligibility_review]
-    unresolved_count = sum(not item.result.candidate_eligibility.review_visible for item in reviews)
+    unresolved_reviews = [
+        item for item in reviews if not item.result.candidate_eligibility.review_visible
+    ]
+    unresolved_count = len(unresolved_reviews)
     reviews = [item for item in reviews if item.result.candidate_eligibility.review_visible]
     matched_jobs = [item for item in matched_jobs if item.result.notification_eligible]
     fresh_matches = sum(1 for item in matched_jobs if item.is_new)
@@ -267,6 +270,18 @@ def render_run_summary(
             lines.append(f"{len(reviews) - max_reviews} additional review records retained in match history.")
     if unresolved_count:
         lines.append(f"Unresolved eligibility/location: {unresolved_count} records retained for inspection; not confirmed local opportunities.")
+        lines.append("Retained unresolved records (not confirmed local opportunities):")
+        for item in sorted(unresolved_reviews, key=lambda match: match.result.score, reverse=True):
+            assessment = item.result.candidate_eligibility
+            company = html.escape(item.company_name or "Company unavailable")
+            title = html.escape(item.job.raw.title or "Title unavailable")
+            location = html.escape(item.job.raw.location_raw or "Location unavailable")
+            reasons = "; ".join(assessment.review_reasons) or "Eligibility/location unresolved"
+            line = f"- {company} - {title} ({location}) — {html.escape(reasons[:450])}"
+            url = str(item.job.raw.url) if item.job.raw.url else ""
+            if url:
+                line += f' <a href="{html.escape(url, quote=True)}">Official posting</a>'
+            lines.append(line)
 
     if not errors and not zero_job_sources:
         lines.append("")
