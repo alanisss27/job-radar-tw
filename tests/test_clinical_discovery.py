@@ -504,6 +504,7 @@ def test_discovery_configuration_and_company_scope():
         "takeda",
         "amgen",
         "regeneron",
+        "vertex-pharmaceuticals",
     }
     assert COMPANIES["nvidia"].ats_config["search_texts"] == [
         "data",

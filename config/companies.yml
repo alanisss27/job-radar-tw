@@ -48,6 +48,26 @@ companies:
     priority: 1
     enabled: true
     source_verified: true
+  # Official Vertex Workday board; U.S. country facet and detail API verified 2026-09-20.
+  # Later listing pages may report total=0 while still returning valid postings.
+  - slug: vertex-pharmaceuticals
+    name: Vertex Pharmaceuticals
+    careers_url: https://vrtx.wd501.myworkdayjobs.com/Vertex_Careers
+    ats_type: workday
+    ats_config:
+      endpoint: https://vrtx.wd501.myworkdayjobs.com/wday/cxs/vrtx/Vertex_Careers/jobs
+      site: vrtx.wd501.myworkdayjobs.com
+      detail_base_url: https://vrtx.wd501.myworkdayjobs.com/en-US/Vertex_Careers
+      detail_api_base: https://vrtx.wd501.myworkdayjobs.com/wday/cxs/vrtx/Vertex_Careers
+      limit: 20
+      applied_facets:
+        locationCountry:
+          - bc33aa3152ec42d4995f4791a106ed09
+    industry: biotech
+    profiles: [clinical-discovery]
+    priority: 1
+    enabled: true
+    source_verified: true
   # Healthcare / payer — structured boards enabled for initial verification.
   - {slug: datavant, name: Datavant, careers_url: "https://boards.greenhouse.io/datavant", ats_type: greenhouse, ats_config: {board_token: datavant}, industry: healthcare, profiles: [healthcare, tech], priority: 1, enabled: false, source_verified: false}
   - {slug: komodo-health, name: Komodo Health, careers_url: "https://boards.greenhouse.io/komodohealth", ats_type: greenhouse, ats_config: {board_token: komodohealth}, industry: healthcare, profiles: [clinical-discovery], priority: 1, enabled: true, source_verified: true}
