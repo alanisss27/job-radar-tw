@@ -360,6 +360,12 @@ class WorkdaySource(JobSource):
             patterns = {key: re.compile(pattern) for key, pattern in facet_patterns.items()}
         except re.error as exc:
             raise SourceError("Invalid Workday facet pattern") from exc
+        validate_locations = cfg.get("validate_location_facets", False)
+        facet_country = cfg.get("location_facet_country")
+        if validate_locations and ("locations" not in patterns or not cfg.get("detail_api_base")):
+            raise SourceError("Workday location validation requires locations pattern and detail API")
+        if facet_country is not None and (not validate_locations or not _usable_text(facet_country)):
+            raise SourceError("Workday location_facet_country requires validated location facets")
         if patterns:
             response = await self.client.post(
                 endpoint,
@@ -444,6 +450,7 @@ class WorkdaySource(JobSource):
                     else:
                         description = str(bullet_fields)
                     eligibility_metadata = _eligibility_metadata(item)
+                    location_metadata = {}
                     if cfg.get("detail_api_base"):
                         try:
                             detail_response = await self.client.get(
@@ -451,6 +458,41 @@ class WorkdaySource(JobSource):
                             )
                             detail_response.raise_for_status()
                             detail = detail_response.json().get("jobPostingInfo", {})
+                            if validate_locations:
+                                primary = detail.get("location")
+                                additional = detail.get("additionalLocations") or []
+                                if (
+                                    not _usable_text(primary)
+                                    or not isinstance(additional, list)
+                                    or any(not _usable_text(value) for value in additional)
+                                    or not any(patterns["locations"].search(value)
+                                               for value in [primary, *additional])
+                                ):
+                                    raise SourceError(
+                                        "Workday detail does not confirm scoped location for "
+                                        f"{self.company.slug}{external_path}"
+                                    )
+                                scoped_additional = [value for value in additional
+                                                     if patterns["locations"].search(value)]
+                                primary_country = (detail.get("country") or {}).get("descriptor")
+                                if (facet_country and not scoped_additional
+                                        and primary_country != facet_country):
+                                    raise SourceError(
+                                        "Workday primary country does not confirm location facet "
+                                        f"for {self.company.slug}{external_path}"
+                                    )
+                                # Country belongs to the primary location, never to an
+                                # additional location merely selected by a search facet.
+                                location_metadata = {"workday_locations": {
+                                    "primary": primary,
+                                    "additional": additional,
+                                    "primary_country": detail.get("country"),
+                                    "requisition_location": detail.get("jobRequisitionLocation"),
+                                    "listing": item.get("locationsText"),
+                                    "facet_country": facet_country,
+                                    "scoped_additional": scoped_additional,
+                                }}
+                                location_parts = [primary]
                             eligibility_metadata.update(_eligibility_metadata(detail))
                             description = _html_text(detail.get("jobDescription") or description)
                             detail_locations = [
@@ -461,12 +503,30 @@ class WorkdaySource(JobSource):
                                 .get("country", {})
                                 .get("alpha2Code"),
                             ]
+                            if validate_locations:
+                                # Put primary country before alternatives. Annotate only
+                                # validated additional labels with their scoped country;
+                                # this supplies US-availability evidence without rewriting
+                                # a foreign primary country or losing mixed-location facts.
+                                detail_locations = [
+                                    primary_country,
+                                    (detail.get("jobRequisitionLocation") or {})
+                                    .get("country", {}).get("alpha2Code"),
+                                    *(f"{value}, {facet_country}"
+                                      if facet_country and value in scoped_additional else value
+                                      for value in additional),
+                                ]
                             for location in detail_locations:
                                 if location and location.casefold() not in {
                                     value.casefold() for value in location_parts if value
                                 }:
                                     location_parts.append(location)
-                        except (httpx.HTTPError, ValueError, TypeError, AttributeError):
+                        except (httpx.HTTPError, ValueError, TypeError, AttributeError) as exc:
+                            if validate_locations:
+                                raise SourceError(
+                                    "Unable to validate Workday scoped location for "
+                                    f"{self.company.slug}{external_path}"
+                                ) from exc
                             logger.warning(
                                 "Unable to enrich Workday detail for %s%s; using listing fields",
                                 self.company.slug,
@@ -484,7 +544,7 @@ class WorkdaySource(JobSource):
                         description_raw=description,
                         posted_at=_parse_datetime(item.get("postedOn")),
                         url=detail_url or f"https://{site}{external_path}",
-                        metadata={"workday": item, **eligibility_metadata},
+                        metadata={"workday": item, **location_metadata, **eligibility_metadata},
                     )
                 offset += len(postings)
                 if not postings:

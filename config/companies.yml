@@ -1,6 +1,33 @@
 # Registry entries are intentionally explicit. `source_verified` means a live API
 # response has been checked, not merely that the company is a desired target.
 companies:
+  # Official Workday board; country facets are ignored by this tenant.
+  # U.S. location labels/campuses validated against official details (see docs/regeneron-source.md).
+  - slug: regeneron
+    name: Regeneron
+    careers_url: https://careers.regeneron.com/en/
+    ats_type: workday
+    ats_config:
+      endpoint: https://regeneron.wd1.myworkdayjobs.com/wday/cxs/regeneron/Careers/jobs
+      site: regeneron.wd1.myworkdayjobs.com
+      detail_base_url: https://regeneron.wd1.myworkdayjobs.com/en-US/Careers
+      detail_api_base: https://regeneron.wd1.myworkdayjobs.com/wday/cxs/regeneron/Careers
+      limit: 20
+      validate_location_facets: true
+      location_facet_country: United States of America
+      facet_patterns:
+        locations: >-
+          (?ix)^(?:
+          .+,\s*(?:AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY|DC)
+          |Remote\s-\s(?:United\sStates|Alabama|Alaska|Arizona|Arkansas|California|Colorado|Connecticut|Delaware|Florida|Georgia|Hawaii|Idaho|Illinois|Indiana|Iowa|Kansas|Kentucky|Louisiana|Maine|Maryland|Massachusetts|Michigan|Minnesota|Mississippi|Missouri|Montana|Nebraska|Nevada|New\sHampshire|New\sJersey|New\sMexico|New\sYork|North\sCarolina|North\sDakota|Ohio|Oklahoma|Oregon|Pennsylvania|Rhode\sIsland|South\sCarolina|South\sDakota|Tennessee|Texas|Utah|Vermont|Virginia|Washington|West\sVirginia|Wisconsin|Wyoming|District\sof\sColumbia)
+          |Armonk|Cambridge|Hawthorne|Los\sAngeles|Saratoga\sSprings|Seattle|SLEEPY\sHOLLOW|TARRYTOWN|Warren|Washington\sDC|RENSSELAER
+          |RENSS\s-\s(?:BLD17\sFilling|GLOBAL\sVIEW|MENANDS|SUNY|TECH\sVALLEY|TEMPEL\sLN)
+          )$
+    industry: biotech
+    profiles: [clinical-discovery]
+    priority: 1
+    enabled: true
+    source_verified: true
   # TalentBrew careers frontend links to this official Workday Careers board.
   # Broad U.S. listing + detail API verified 2026-09-19; facet key is case-sensitive.
   - slug: amgen
