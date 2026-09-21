@@ -610,6 +610,87 @@ def _clinical_project_support_evidence(title: str, description: str) -> set[str]
     return set(sorted(set(matched))[:3])
 
 
+_CTM_TITLE = re.compile(
+    r"(?:(?:associate\s+)?clinical\s+trials?\s+manager)"
+    r"(?:\s*[-\u2013\u2014,:(].*)?$",
+    re.I,
+)
+_CTM_TITLE_EXCLUSIONS = re.compile(
+    r"\b(?:senior|sr\.?|lead|principal|director|head|vp|vice\s+president|"
+    r"executive)\b",
+    re.I,
+)
+_CTM_DUTY_ACTION = (
+    r"(?:manage|manages|managed|managing|coordinate|coordinates|coordinated|coordinating|"
+    r"plan|plans|planned|planning|develop|develops|developed|developing|maintain|maintains|"
+    r"maintained|maintaining|track|tracks|tracked|tracking|report|reports|reported|reporting|"
+    r"prepare|prepares|prepared|preparing|support|supports|supported|supporting|"
+    r"lead|leads|led|leading|oversee|oversees|oversaw|overseeing)"
+)
+_CTM_DUTY_CATEGORIES = {
+    "planning_timelines": re.compile(
+        rf"\b{_CTM_DUTY_ACTION}\b(?:\s+\w+){{0,5}}\s+(?:clinical\s+)?"
+        r"(?:trial|study)\s+(?:plans?|planning|timelines?|milestones?|execution)\b|"
+        rf"\b{_CTM_DUTY_ACTION}\b(?:\s+\w+){{0,5}}\s+(?:trial|study)\s+start[- ]?up\b",
+        re.I,
+    ),
+    "vendor_stakeholder_coordination": re.compile(
+        r"\b(?:manage|manages|managed|managing|coordinate|coordinates|coordinated|"
+        r"coordinating|support|supports|supported|supporting|lead|leads|led|leading)\b"
+        r"(?:\s+\w+){0,5}\s+(?:vendors?|sites?|stakeholders?|study teams?|trial teams?|"
+        r"clinical teams?|external partners?)\b",
+        re.I,
+    ),
+    "tracking_reporting": re.compile(
+        r"\b(?:track|tracks|tracked|tracking|report|reports|reported|reporting|prepare|"
+        r"prepares|prepared|preparing|maintain|maintains|maintained|maintaining)\b"
+        r"(?:\s+\w+){0,5}\s+(?:trial|study)?\s*(?:status|updates?|metrics?|actions?|"
+        r"action items?|risks?|issues?|milestones?)\b",
+        re.I,
+    ),
+    "trial_deliverables": re.compile(
+        rf"\b{_CTM_DUTY_ACTION}\b(?:\s+\w+){{0,5}}\s+(?:trial|study)\s+deliverables?\b",
+        re.I,
+    ),
+    "tmf_trial_documentation": re.compile(
+        r"\b(?:manage|manages|managed|managing|coordinate|coordinates|coordinated|"
+        r"coordinating|maintain|maintains|maintaining|prepare|prepares|"
+        r"prepared|preparing|support|supports|supported|supporting)\b(?:\s+\w+){0,5}\s+"
+        r"(?:tmf|e?tmf|trial\s+master\s+file|trial|study)\s+documentation\b",
+        re.I,
+    ),
+}
+_CTM_CLINICAL_CONTEXT = re.compile(
+    r"\b(?:clinical\s+trials?|clinical\s+studies?|clinical\s+operations?|"
+    r"study\s+protocol|ich[- ]?gcp|gcp)\b",
+    re.I,
+)
+
+
+def _clinical_trial_manager_evidence(title: str, description: str) -> set[str]:
+    """Find affirmative, multi-category evidence for bounded CTM titles."""
+    if not _CTM_TITLE.fullmatch(title.strip()) or _CTM_TITLE_EXCLUSIONS.search(title):
+        return set()
+    clauses = _clinical_clauses(description)
+    if not any(_CTM_CLINICAL_CONTEXT.search(clause) for clause in clauses):
+        return set()
+    categories: set[str] = set()
+    excerpts: list[str] = []
+    for clause in clauses:
+        matched = [
+            name for name, pattern in _CTM_DUTY_CATEGORIES.items() if pattern.search(clause)
+        ]
+        if matched:
+            categories.update(matched)
+            excerpts.append(clause)
+    if len(categories) < 2:
+        return set()
+    return {
+        f"clinical trial manager ({', '.join(sorted(categories))}): {clause}"
+        for clause in sorted(set(excerpts))[:3]
+    }
+
+
 def _level_fit(
     job: ParsedJob, candidate: CandidateProfile, company_ndx_member: bool = False
 ) -> tuple[float, int]:
@@ -874,8 +955,12 @@ def _match_discovery(
     )
     clinical_coordination_hits: set[str] = set()
     clinical_project_support_hits: set[str] = set()
+    clinical_trial_manager_hits: set[str] = set()
     transferable_pm_hits: set[str] = set()
     if profile.name == "clinical-discovery":
+        clinical_trial_manager_hits = _clinical_trial_manager_evidence(
+            job.raw.title, job.raw.description_raw
+        )
         transferable_pm_hits = _transferable_pm_evidence(
             job.raw.title, job.raw.description_raw
         )
@@ -886,7 +971,10 @@ def _match_discovery(
             job.raw.title, job.raw.description_raw
         )
     bounded_discovery_hit = bool(
-        clinical_coordination_hits or clinical_project_support_hits or transferable_pm_hits
+        clinical_coordination_hits
+        or clinical_project_support_hits
+        or clinical_trial_manager_hits
+        or transferable_pm_hits
     )
     if (
         profile.allow_other_job_family
@@ -963,6 +1051,10 @@ def _match_discovery(
     if clinical_project_support_hits:
         reasons.append(
             "clinical project support: " + " | ".join(sorted(clinical_project_support_hits))
+        )
+    if clinical_trial_manager_hits:
+        reasons.append(
+            "clinical trial manager: " + " | ".join(sorted(clinical_trial_manager_hits))
         )
     if transferable_pm_hits:
         reasons.append("transferable life-science PM: " + ", ".join(sorted(transferable_pm_hits)))
