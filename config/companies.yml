@@ -1,6 +1,28 @@
 # Registry entries are intentionally explicit. `source_verified` means a live API
 # response has been checked, not merely that the company is a desired target.
 companies:
+  # Official Workday board verified 2026-09-21; onboarded for future monitoring.
+  # Audit: 72 global / 28 US-available / 27 US-primary; no qualified discovery roles.
+  # US availability includes foreign-primary postings with validated US alternatives.
+  - slug: premier-research
+    name: Premier Research
+    careers_url: https://premier-research.com/careers/
+    ats_type: workday
+    ats_config:
+      endpoint: https://premierresearch.wd12.myworkdayjobs.com/wday/cxs/premierresearch/PremierResearch/jobs
+      site: premierresearch.wd12.myworkdayjobs.com
+      detail_base_url: https://premierresearch.wd12.myworkdayjobs.com/en-US/PremierResearch
+      detail_api_base: https://premierresearch.wd12.myworkdayjobs.com/wday/cxs/premierresearch/PremierResearch
+      limit: 20
+      facet_patterns:
+        locations: '^United States of America$'
+      validate_location_facets: true
+      location_facet_country: United States of America
+    industry: clinical-services
+    profiles: [clinical-discovery]
+    priority: 2
+    enabled: true
+    source_verified: true
   # Official Workday board; country facets are ignored by this tenant.
   # U.S. location labels/campuses validated against official details (see docs/regeneron-source.md).
   - slug: regeneron
