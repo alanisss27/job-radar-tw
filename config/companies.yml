@@ -48,6 +48,32 @@ companies:
     priority: 1
     enabled: true
     source_verified: true
+  # Official Moderna Workday board; primarylocation facet and detail API validated 2026-09-20.
+  - slug: moderna
+    name: Moderna
+    careers_url: https://modernatx.wd1.myworkdayjobs.com/M_tx
+    ats_type: workday
+    ats_config:
+      endpoint: https://modernatx.wd1.myworkdayjobs.com/wday/cxs/modernatx/M_tx/jobs
+      site: modernatx.wd1.myworkdayjobs.com
+      detail_base_url: https://modernatx.wd1.myworkdayjobs.com/en-US/M_tx
+      detail_api_base: https://modernatx.wd1.myworkdayjobs.com/wday/cxs/modernatx/M_tx
+      limit: 20
+      location_facet_parameter: primarylocation
+      validate_location_facets: true
+      location_facet_country: United States of America
+      facet_patterns:
+        locations: >-
+          (?ix)^(?:
+          (?:Cambridge|Norwood|Marlborough),\s+(?:Massachusetts|MA)(?:,\s+United\s+States(?:\s+of\s+America)?)?
+          |Princeton,\s+(?:New\s+Jersey|NJ)(?:,\s+United\s+States(?:\s+of\s+America)?)?
+          |Remote\s-\sUS
+          )$
+    industry: biotech
+    profiles: [clinical-discovery]
+    priority: 1
+    enabled: true
+    source_verified: true
   # Official Vertex Workday board; U.S. country facet and detail API verified 2026-09-20.
   # Later listing pages may report total=0 while still returning valid postings.
   - slug: vertex-pharmaceuticals

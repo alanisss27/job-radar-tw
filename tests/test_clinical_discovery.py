@@ -564,6 +564,7 @@ def test_discovery_configuration_and_company_scope():
         "regeneron",
         "vertex-pharmaceuticals",
         "gilead-sciences",
+        "moderna",
         "bristol-myers-squibb",
     }
     assert COMPANIES["nvidia"].ats_config["search_texts"] == [
