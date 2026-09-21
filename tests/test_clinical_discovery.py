@@ -255,6 +255,64 @@ def test_generic_project_manager_with_life_sciences_evidence_qualifies():
     assert result.score >= PROFILE.threshold
 
 
+SYNERG_VALIDATION_BODY = (
+    "Lead validation activities across equipment, utilities, facilities, computerized systems, "
+    "and manufacturing processes within GMP-regulated environments. Develop, execute, and manage "
+    "validation lifecycle documentation, including IQ, OQ, PQ, and FAT/SAT protocols. Oversee "
+    "validation activities for internal and client tech transfer projects, including validation "
+    "plans and risk assessments. Collaborate cross-functionally to ensure validation activities "
+    "align with project timelines and operational needs."
+)
+
+
+@pytest.mark.parametrize("title", [
+    "Validation Engineer",
+    "Senior Validation Engineer",
+    "CSV Validation Engineer",
+    "CQV Engineer",
+    "Senior CQV Engineer",
+])
+def test_technical_validation_execution_does_not_use_incidental_project_context(title):
+    result = match(title, SYNERG_VALIDATION_BODY)
+    assert not result.eligible
+    assert result.score < PROFILE.threshold
+    assert result.filtered_reason == "discovery_responsibility_evidence"
+
+
+def test_validation_specialist_with_affirmative_project_duties_remains_discoverable():
+    result = match(
+        "Validation Specialist",
+        "Coordinate project stakeholders. Maintain project plans. "
+        "Track project milestones, risks, and actions for GMP validation work.",
+    )
+    assert result.eligible
+    assert result.score >= PROFILE.threshold
+
+
+@pytest.mark.parametrize("title", [
+    "Validation Project Manager",
+    "Validation Project Coordinator",
+    "Technical Operations Project Manager",
+])
+def test_explicit_validation_and_technical_operations_pm_titles_remain_discoverable(title):
+    assert match(title).eligible
+
+
+@pytest.mark.parametrize("title", [
+    "Associate Director, Technical Operations",
+    "Director, Technical Operations",
+])
+def test_technical_operations_leadership_needs_affirmative_pm_duties(title):
+    result = match(
+        title,
+        "Lead regulated validation activities and technical operations. "
+        "Support tech transfer work and align execution with project timelines.",
+    )
+    assert not result.eligible
+    assert result.score == 0
+    assert result.filtered_reason == "discovery_responsibility_evidence"
+
+
 @pytest.mark.parametrize(
     "title,description",
     [

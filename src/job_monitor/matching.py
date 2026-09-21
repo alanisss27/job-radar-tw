@@ -658,6 +658,53 @@ _PM_WORK_DOMAIN = re.compile(
     r"(?:scientific|laboratory|lab) operations|regulated research)\b", re.I,
 )
 
+_PM_AFFIRMATIVE_FALLBACK_PATTERNS = (
+    r"\b(?:manage|manages|managed|managing|lead|leads|led|leading)\s+(?:\w+\s+){0,2}projects?\b",
+    r"\b(?:coordinate|coordinates|coordinated|coordinating)\s+(?:\w+\s+){0,2}projects?\b",
+    r"\b(?:coordinate|coordinates|coordinated|coordinating)\s+(?:\w+\s+){0,3}"
+    r"(?:project\s+)?(?:teams?|stakeholders?|sponsors?|clients?|vendors?)\b",
+    r"\b(?:develop|develops|developed|developing|maintain|maintains|maintained|maintaining)\s+"
+    r"(?:\w+\s+){0,2}project\s+(?:plans?|schedules?|timelines?|milestones?)\b",
+    r"\b(?:own|owns|owned|owning|track|tracks|tracked|tracking|monitor|monitors|monitored|monitoring)\s+"
+    r"(?:project\s+)?(?:milestones?|actions?|action items?|risks?|issues?|deliverables?|"
+    r"timelines?|status)\b",
+    r"\b(?:report|reports|reported|reporting)\s+(?:project\s+)?status\b",
+    r"\bfacilitate(?:s|d|ing)?\s+project\s+meetings?\b",
+    r"\bsupport(?:s|ed|ing)?\s+project\s+(?:planning|execution)\b",
+)
+_PM_AFFIRMATIVE_ACTION = re.compile(
+    r"\b(?:manage|manages|managed|managing|lead|leads|led|leading|coordinate|coordinates|"
+    r"coordinated|coordinating|develop|develops|developed|developing|maintain|maintains|"
+    r"maintained|maintaining|own|owns|owned|owning|track|tracks|tracked|tracking|monitor|"
+    r"monitors|monitored|monitoring|report|reports|reported|reporting|facilitate|facilitates|"
+    r"facilitated|facilitating|support|supports|supported|supporting)\b",
+    re.I,
+)
+
+
+def _affirmative_pm_fallback_evidence(description: str) -> bool:
+    """Require an assigned project-management action for the broad fallback."""
+    for clause in _clinical_clauses(html.unescape(description)):
+        if re.search(
+            r"\b(?:no|not|without|preferred|experience|familiarity|company|employer|"
+            r"organization|department|capability|discipline)\b",
+            clause,
+            re.I,
+        ):
+            continue
+        action = _PM_DUTY_ACTION.match(clause) or _PM_AFFIRMATIVE_ACTION.search(clause)
+        if not action:
+            continue
+        if re.search(
+            r"\b(?:is|are|means|refers to|includes?|involves?)\b",
+            clause[action.end():],
+            re.I,
+        ):
+            continue
+        if any(re.search(pattern, clause, re.I) for pattern in _PM_AFFIRMATIVE_FALLBACK_PATTERNS):
+            return True
+    return False
+
 
 def _transferable_pm_evidence(title: str, description: str) -> set[str]:
     """Path B: bounded titles, credible domain, and three distinct PM categories.
@@ -853,6 +900,7 @@ def _match_discovery(
             and not domain_hits
             or not responsibility_title_hits
             or responsibility_title_exclusions
+            or not _affirmative_pm_fallback_evidence(job.raw.description_raw)
         ):
             return MatchResult(
                 profile=profile.name,
