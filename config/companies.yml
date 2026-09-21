@@ -1,6 +1,26 @@
 # Registry entries are intentionally explicit. `source_verified` means a live API
 # response has been checked, not merely that the company is a desired target.
 companies:
+  # SCRI's official careers page links to this dedicated McKesson Workday board.
+  # U.S. country facet and detail enrichment verified 2026-09-21.
+  - slug: mckesson-scri
+    name: McKesson / Sarah Cannon Research Institute (SCRI)
+    careers_url: https://www.scri.com/careers/
+    ats_type: workday
+    ats_config:
+      endpoint: https://mckesson.wd3.myworkdayjobs.com/wday/cxs/mckesson/SCRI_Careers/jobs
+      site: mckesson.wd3.myworkdayjobs.com
+      detail_base_url: https://mckesson.wd3.myworkdayjobs.com/en-US/SCRI_Careers
+      detail_api_base: https://mckesson.wd3.myworkdayjobs.com/wday/cxs/mckesson/SCRI_Careers
+      limit: 20
+      applied_facets:
+        Location_Country:
+          - bc33aa3152ec42d4995f4791a106ed09
+    industry: clinical-services
+    profiles: [clinical-discovery]
+    priority: 1
+    enabled: true
+    source_verified: true
   # Official Workday board verified 2026-09-21; onboarded for future monitoring.
   # Audit: 72 global / 28 US-available / 27 US-primary; no qualified discovery roles.
   # US availability includes foreign-primary postings with validated US alternatives.
