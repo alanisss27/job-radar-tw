@@ -243,6 +243,58 @@ def test_state_screening_is_not_commute_approval():
     )
 
 
+@pytest.mark.parametrize(
+    ("location", "body"),
+    [
+        ("Boston, MA", "This role is explicitly onsite."),
+        ("Boston / Waltham, MA", "This role requires onsite attendance."),
+        ("Middleton, WI", "Frequent onsite attendance is required."),
+        ("Knoxville, TN", "Work is performed onsite."),
+        ("Nashville, TN", "This is an onsite position."),
+    ],
+)
+def test_resolved_out_of_state_physical_attendance_is_not_commute_unresolved(location, body):
+    result = assess_candidate(raw(location=location, body=body), preferences())
+    assert result.status == "unsuitable"
+    assert any("onsite_geography_incompatible" in reason for reason in result.hard_reasons)
+    assert any("resolved out-of-scope physical attendance" in reason for reason in result.hard_reasons)
+    assert not any("commute_unresolved" in reason for reason in result.review_reasons)
+
+
+def test_florida_onsite_without_practical_commute_approval_remains_review_needed():
+    result = assess_candidate(
+        raw(location="Orlando, FL", body="This role is explicitly onsite."), preferences()
+    )
+    assert result.status == "review_needed"
+    assert "commute_not_verified" in result.review_reasons[0]
+
+
+def test_remote_job_with_out_of_state_office_does_not_fail_physical_geography():
+    result = assess_candidate(
+        raw(
+            location="Boston, MA",
+            body="This role is fully remote and employees may reside in Florida.",
+        ),
+        preferences(),
+    )
+    assert result.status == "eligible"
+
+
+def test_ambiguous_or_missing_physical_location_remains_review_needed():
+    result = assess_candidate(raw(location="Unknown location", body="This role is onsite."), preferences())
+    assert result.status == "review_needed"
+    assert "commute_unresolved: location missing or ambiguous" in result.review_reasons
+
+
+def test_mixed_resolved_and_unresolved_locations_remain_review_needed():
+    result = assess_candidate(
+        raw(location="Boston, MA; location to be confirmed", body="This role is onsite."),
+        preferences(),
+    )
+    assert result.status == "review_needed"
+    assert "commute_unresolved: location missing or ambiguous" in result.review_reasons
+
+
 def test_structured_requirements_and_remote_scope():
     metadata = _eligibility_metadata(
         {

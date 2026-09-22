@@ -106,9 +106,9 @@ def test_amgen_uses_existing_discovery_rules(title, body, expected):
     ("United States - Remote", "Must reside in California.", "Remote", "unsuitable"),
     ("Tampa, FL", "Onsite three days per week.", "Onsite", "eligible"),
     ("Thousand Oaks, CA", "Onsite three days per week.", "Onsite", "unsuitable"),
-    # Preserve conservative review when the shared parser cannot resolve ATS labels.
+    # State tokens in ATS labels are resolved even when the city/state order is nonstandard.
     ("US - Florida - Tampa", "Onsite three days per week.", "Onsite", "review_needed"),
-    ("US - California - Thousand Oaks", "Onsite three days per week.", "Onsite", "review_needed"),
+    ("US - California - Thousand Oaks", "Onsite three days per week.", "Onsite", "unsuitable"),
     ("United States", "", "", "review_needed"),
     ("United States - Remote", "Active RN license required.", "Remote", "unsuitable"),
 ])

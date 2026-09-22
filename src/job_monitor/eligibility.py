@@ -408,6 +408,13 @@ def location_states(label: str) -> set[str]:
     direct = normalize_state(cleaned)
     if direct:
         return {direct}
+    # Location fields commonly contain more than one city or a country suffix,
+    # for example ``Boston / Waltham, MA`` or ``Boston, MA, United States``.
+    # Resolve state tokens wherever they occur in the location-shaped value;
+    # do not require the state to be the final comma-delimited component.
+    found = states_in(cleaned)
+    if found:
+        return found
     # A conflicting/foreign trailing component does not disappear into a US match.
     pieces = [part.strip() for part in cleaned.split(",") if part.strip()]
     if len(pieces) >= 2:
@@ -471,7 +478,8 @@ def _physical_assessment(
     if mandatory_bad or all_bad:
         evidence = mandatory_bad or result.locations
         result.hard_reasons.append(
-            "onsite_geography_incompatible: " + "; ".join(loc.label for loc in evidence)
+            "onsite_geography_incompatible: resolved out-of-scope physical attendance: "
+            + "; ".join(loc.label for loc in evidence)
         )
     elif not result.locations or any(not loc.states for loc in result.locations):
         result.review_reasons.append("commute_unresolved: location missing or ambiguous")
