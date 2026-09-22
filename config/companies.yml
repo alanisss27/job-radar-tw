@@ -43,6 +43,83 @@ companies:
     priority: 2
     enabled: true
     source_verified: true
+  # Official Workday boards verified 2026-09-22; configuration-only onboarding.
+  - slug: biogen
+    name: Biogen
+    careers_url: https://www.biogen.com/careers/careers-search.html
+    ats_type: workday
+    ats_config:
+      endpoint: https://biibhr.wd3.myworkdayjobs.com/wday/cxs/biibhr/external/jobs
+      site: biibhr.wd3.myworkdayjobs.com
+      detail_base_url: https://biibhr.wd3.myworkdayjobs.com/en-US/external
+      detail_api_base: https://biibhr.wd3.myworkdayjobs.com/wday/cxs/biibhr/external
+      limit: 20
+      facet_patterns:
+        locations: '^United States of America$'
+      location_facet_parameter: locationCountry
+    industry: biotech
+    profiles: [clinical-discovery]
+    priority: 1
+    enabled: true
+    source_verified: true
+  - slug: johnson-johnson
+    name: Johnson & Johnson (J&J)
+    careers_url: https://www.careers.jnj.com/en
+    ats_type: workday
+    ats_config:
+      endpoint: https://jj.wd5.myworkdayjobs.com/wday/cxs/jj/JJ/jobs
+      site: jj.wd5.myworkdayjobs.com
+      detail_base_url: https://jj.wd5.myworkdayjobs.com/en-US/JJ
+      detail_api_base: https://jj.wd5.myworkdayjobs.com/wday/cxs/jj/JJ
+      limit: 20
+      facet_patterns:
+        locations: >-
+          (?i)^(?:.+,\s*United States(?: of America)?|Remote \(US\))$
+      validate_location_facets: true
+      location_facet_country: United States of America
+    industry: pharmaceutical
+    profiles: [clinical-discovery]
+    priority: 1
+    enabled: true
+    source_verified: true
+  - slug: genentech
+    name: Genentech
+    careers_url: https://careers.gene.com/us/en
+    ats_type: workday
+    ats_config:
+      endpoint: https://roche.wd3.myworkdayjobs.com/wday/cxs/roche/ROG-A2O-GENE/jobs
+      site: roche.wd3.myworkdayjobs.com
+      detail_base_url: https://roche.wd3.myworkdayjobs.com/en-US/ROG-A2O-GENE
+      detail_api_base: https://roche.wd3.myworkdayjobs.com/wday/cxs/roche/ROG-A2O-GENE
+      limit: 20
+      applied_facets:
+        locations:
+          - 54c59631019f01dfe7343afbab7747c3
+          - 54c59631019f01731ce29bd5ab777fbf
+    industry: biotech
+    profiles: [clinical-discovery]
+    priority: 1
+    enabled: true
+    source_verified: true
+  - slug: mass-general-brigham
+    name: Mass General Brigham
+    careers_url: https://www.massgeneralbrigham.org/en/about/careers
+    ats_type: workday
+    ats_config:
+      endpoint: https://massgeneralbrigham.wd1.myworkdayjobs.com/wday/cxs/massgeneralbrigham/MGBExternal/jobs
+      site: massgeneralbrigham.wd1.myworkdayjobs.com
+      detail_base_url: https://massgeneralbrigham.wd1.myworkdayjobs.com/en-US/MGBExternal
+      detail_api_base: https://massgeneralbrigham.wd1.myworkdayjobs.com/wday/cxs/massgeneralbrigham/MGBExternal
+      limit: 20
+      applied_facets:
+        jobFamily:
+          - 1856eb1940d51000cc9ee68cab150000
+          - 1856eb1940d51000cc9ee7bfd83d0000
+    industry: healthcare
+    profiles: [clinical-discovery]
+    priority: 1
+    enabled: true
+    source_verified: true
   # Official Workday board; country facets are ignored by this tenant.
   # U.S. location labels/campuses validated against official details (see docs/regeneron-source.md).
   - slug: regeneron

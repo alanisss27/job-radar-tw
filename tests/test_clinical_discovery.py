@@ -568,6 +568,10 @@ def test_discovery_configuration_and_company_scope():
         "bristol-myers-squibb",
         "premier-research",
         "mckesson-scri",
+        "biogen",
+        "johnson-johnson",
+        "genentech",
+        "mass-general-brigham",
     }
     assert COMPANIES["nvidia"].ats_config["search_texts"] == [
         "data",
