@@ -69,6 +69,32 @@ companies:
     priority: 1
     enabled: true
     source_verified: true
+  # Official Workday board verified 2026-09-22. The source exposes 2,000+
+  # postings; intersecting relevant family facets keeps enrichment bounded.
+  - slug: adventhealth
+    name: AdventHealth
+    careers_url: https://jobs.adventhealth.com/
+    ats_type: workday
+    ats_config:
+      endpoint: https://adventhealth.wd12.myworkdayjobs.com/wday/cxs/adventhealth/AH_External_Career_Site/jobs
+      site: adventhealth.wd12.myworkdayjobs.com
+      detail_base_url: https://adventhealth.wd12.myworkdayjobs.com/en-US/AH_External_Career_Site
+      detail_api_base: https://adventhealth.wd12.myworkdayjobs.com/wday/cxs/adventhealth/AH_External_Career_Site
+      limit: 20
+      applied_facets:
+        jobFamilyGroup:
+          - 6efc9f98b4f21000a90343af6fa10000
+          - 6efc9f98b4f21000a9034ae493810000
+        jobFamily:
+          - 6efc9f98b4f21000a903896803d10000
+          - 6efc9f98b4f21000a903ed2dedaf0000
+          - 6efc9f98b4f21000a903f932747d0000
+          - 6efc9f98b4f21000a90320d2635a0000
+    industry: healthcare
+    profiles: [clinical-discovery]
+    priority: 1
+    enabled: true
+    source_verified: true
   # Official Workday boards verified 2026-09-22; configuration-only onboarding.
   - slug: biogen
     name: Biogen
