@@ -43,6 +43,32 @@ companies:
     priority: 2
     enabled: true
     source_verified: true
+  # Official Otsuka US Workday board verified 2026-09-22; API company path
+  # uses the tenant's normalized underscore form. The location-country facet
+  # keeps the routine scan scoped to current U.S. postings.
+  - slug: otsuka-pharmaceutical
+    name: Otsuka Pharmaceutical Companies
+    careers_url: https://www.otsuka-us.com/careers-join-otsuka
+    ats_type: workday
+    ats_config:
+      endpoint: https://vhr-otsuka.wd1.myworkdayjobs.com/wday/cxs/vhr_otsuka/External/jobs
+      site: vhr-otsuka.wd1.myworkdayjobs.com
+      detail_base_url: https://vhr-otsuka.wd1.myworkdayjobs.com/en-US/External
+      detail_api_base: https://vhr-otsuka.wd1.myworkdayjobs.com/wday/cxs/vhr_otsuka/External
+      limit: 20
+      facet_patterns:
+        locations: '(?i)^(?:Remote(?:-Sales)?|.*United States(?: of America)?.*)$'
+      location_facet_parameter: locationCountry
+      validate_location_facets: true
+      location_facet_country: United States of America
+      applied_facets:
+        locationCountry:
+          - bc33aa3152ec42d4995f4791a106ed09
+    industry: pharmaceutical
+    profiles: [clinical-discovery]
+    priority: 1
+    enabled: true
+    source_verified: true
   # Official Workday boards verified 2026-09-22; configuration-only onboarding.
   - slug: biogen
     name: Biogen
