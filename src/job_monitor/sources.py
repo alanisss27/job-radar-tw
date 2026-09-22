@@ -786,10 +786,16 @@ class JibeSource(JobSource):
     async def fetch(self) -> list[RawJob]:
         cfg = self.company.ats_config
         limit = int(cfg.get("limit", 100))
+        static_params = cfg.get("query_params", {})
+        if not isinstance(static_params, Mapping):
+            raise SourceError(f"Jibe query_params for {self.company.slug} must be a mapping")
         page = 1
         jobs: list[RawJob] = []
         while True:
-            payload = await self.get_json(cfg["endpoint"], params={"page": page, "limit": limit})
+            params = dict(static_params)
+            # Pagination is adapter-owned; static configuration cannot override it.
+            params.update(page=page, limit=limit)
+            payload = await self.get_json(cfg["endpoint"], params=params)
             entries = payload.get("jobs", []) if isinstance(payload, dict) else []
             if not isinstance(entries, list):
                 raise SourceError(f"Jibe response for {self.company.slug} has no jobs list")

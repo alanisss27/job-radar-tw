@@ -267,6 +267,63 @@ async def test_jibe_filters_us_and_paginates():
 
 
 @pytest.mark.asyncio
+@respx.mock
+async def test_jibe_merges_static_query_params_without_overriding_pagination():
+    category = "Quality Assurance & Research"
+    cfg = company(
+        "jibe",
+        {
+            "endpoint": "https://example.com/api/jobs",
+            "limit": 2,
+            "query_params": {"categories": category, "page": 99, "limit": 99},
+        },
+    )
+    endpoint = cfg.ats_config["endpoint"]
+    first = respx.get(endpoint, params={"categories": category, "page": "1", "limit": "2"}).respond(
+        200,
+        json={
+            "totalCount": 3,
+            "jobs": [{
+                "data": {
+                    "req_id": "1",
+                    "title": "Quality Research Coordinator",
+                    "country_code": "US",
+                    "full_location": "Tampa, Florida",
+                    "description": "Research quality operations",
+                }
+            }, {
+                "data": {
+                    "req_id": "1b",
+                    "title": "Quality Research Associate",
+                    "country_code": "CA",
+                    "full_location": "Toronto, Canada",
+                    "description": "Research quality operations",
+                }
+            }],
+        },
+    )
+    second = respx.get(endpoint, params={"categories": category, "page": "2", "limit": "2"}).respond(
+        200,
+        json={
+            "totalCount": 3,
+            "jobs": [{
+                "data": {
+                    "req_id": "2",
+                    "title": "Quality Operations Specialist",
+                    "country_code": "US",
+                    "full_location": "Orlando, Florida",
+                    "description": "Coordinate quality operations",
+                }
+            }],
+        },
+    )
+    async with httpx.AsyncClient() as client:
+        rows = await JibeSource(cfg, client).fetch()
+    assert first.called and second.called
+    assert [row.external_job_id for row in rows] == ["1", "2"]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("country", ["ca", "us"])
 @respx.mock
 async def test_smartrecruiters_preserves_structured_country_code(country):
