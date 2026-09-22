@@ -477,6 +477,20 @@ companies:
     priority: 2
     enabled: true
     source_verified: true
+  - slug: orlando-health
+    name: Orlando Health
+    careers_url: https://careers.orlandohealth.com/
+    ats_type: jibe
+    ats_config:
+      endpoint: https://orlandohealth.jibeapply.com/api/jobs
+      limit: 20
+      query_params:
+        categories: Quality Assurance & Research
+    industry: clinical-services
+    profiles: [clinical-discovery]
+    priority: 2
+    enabled: true
+    source_verified: true
   - slug: takeda
     name: Takeda Pharmaceutical
     careers_url: https://takeda.wd502.myworkdayjobs.com/en-US/External
