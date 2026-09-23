@@ -92,6 +92,13 @@ def _usable_text(value: Any) -> bool:
     return isinstance(value, str) and bool(value.strip())
 
 
+def _workday_detail_unavailable(detail: Any) -> bool:
+    """Return true only for explicit boolean Workday unavailable signals."""
+    return isinstance(detail, Mapping) and (
+        detail.get("posted") is False or detail.get("canApply") is False
+    )
+
+
 def _item_summary(item: Any) -> str:
     if not isinstance(item, dict):
         return repr(item)[:300]
@@ -579,6 +586,14 @@ class WorkdaySource(JobSource):
                                 "GET", cfg["detail_api_base"].rstrip("/") + external_path
                             )
                             detail = detail_response.json().get("jobPostingInfo", {})
+                            if _workday_detail_unavailable(detail):
+                                self._record_exclusion(
+                                    item,
+                                    title,
+                                    external_path,
+                                    "detail availability indicates posting is closed or unavailable",
+                                )
+                                continue
                             if validate_locations:
                                 primary = detail.get("location")
                                 additional = detail.get("additionalLocations") or []

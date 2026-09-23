@@ -551,6 +551,69 @@ async def test_workday_detail_api_replaces_listing_description():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
+    ("availability", "retained"),
+    [
+        ({"posted": True, "canApply": True}, True),
+        ({"posted": False, "canApply": True}, False),
+        ({"posted": True, "canApply": False}, False),
+        ({}, True),
+        ({"posted": True}, True),
+        ({"canApply": True}, True),
+        ({"posted": False}, False),
+        ({"canApply": False}, False),
+        ({"posted": "false", "canApply": "false"}, True),
+    ],
+)
+@respx.mock
+async def test_workday_detail_explicit_availability_controls_retention(availability, retained):
+    endpoint = "https://acme.wd1.myworkdayjobs.com/wday/cxs/acme/External/jobs"
+    external_path = "/job/US/Project-Manager_R-availability"
+    detail_api_base = "https://acme.wd1.myworkdayjobs.com/wday/cxs/acme/External"
+    respx.post(endpoint).respond(
+        200,
+        json={
+            "total": 1,
+            "jobPostings": [{
+                "title": "Project Manager",
+                "externalPath": external_path,
+                "locationsText": "United States",
+            }],
+        },
+    )
+    respx.get(detail_api_base + external_path).respond(
+        200,
+        json={
+            "jobPostingInfo": {
+                "jobDescription": "Project operations",
+                **availability,
+            }
+        },
+    )
+    cfg = company(
+        "workday",
+        {
+            "endpoint": endpoint,
+            "site": "acme.wd1.myworkdayjobs.com",
+            "detail_base_url": "https://acme.wd1.myworkdayjobs.com/en-US/External",
+            "detail_api_base": detail_api_base,
+        },
+    )
+
+    async with httpx.AsyncClient() as client:
+        source = WorkdaySource(cfg, client)
+        rows = await source.fetch()
+
+    assert bool(rows) is retained
+    if retained:
+        assert rows[0].external_job_id == external_path
+    else:
+        assert source.warnings[0]["reason"] == (
+            "detail availability indicates posting is closed or unavailable"
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
     ("listing_location", "detail_location", "additional", "country", "code"),
     [
         (
