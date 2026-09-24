@@ -55,7 +55,7 @@ def test_transition_titles_alone_or_incidental_keywords_do_not_qualify(title, bo
 @pytest.mark.parametrize("title", [
     "Associate", "Specialist", "Assistant", "Study Coordinator", "Project Support",
     "Study Management Associate", "Feasibility Specialist", "Site Intelligence Associate",
-    "Development Operations Associate", "Vendor Operations Coordinator",
+    "Vendor Operations Coordinator",
     "Clinical Study Associate Manager", "Associate Clinical Study Manager",
     "Clinical Study Associate Director", "Clinical Study Specialist - Study Lead",
     "Clinical Project Associate - CRA Monitoring", "Clinical Trial Assistant Manager",

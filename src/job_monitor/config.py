@@ -81,6 +81,7 @@ class ProfileConfig(BaseModel):
     strong_threshold: float = Field(default=0.78, ge=0, le=1)
     weights: dict[str, float]
     title_terms: list[str]
+    contextual_title_families: dict[str, list[str]] = Field(default_factory=dict)
     allow_other_job_family: bool = False
     responsibility_terms: list[str] = Field(default_factory=list)
     domain_terms: list[str]

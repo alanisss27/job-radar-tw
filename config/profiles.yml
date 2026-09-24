@@ -1,6 +1,6 @@
 profiles:
   - name: clinical-discovery
-    version: "1.1"
+    version: "1.2"
     # Assign only to relevant healthcare/life-science employers.
     # Scores indicate discovery evidence, not candidate fit.
     threshold: 0.70
@@ -74,6 +74,80 @@ profiles:
       - gmp/gxp operations manager
       - quality operations project manager
       - technical operations project manager
+    # Additive title discovery with domain/workflow context; not candidate fit.
+    # Hyphenated start-up/startup and numbered levels (e.g. Associate II) normalize.
+    contextual_title_families:
+      scientific_research_operations:
+        - scientific research coordinator
+        - scientific leadership research coordinator
+        - scientific operations coordinator
+        - scientific operations associate
+        - research operations coordinator
+        - research operations associate
+        - research project coordinator
+        - research program coordinator
+        - scientific project coordinator
+        - scientific affairs coordinator
+        - research operations specialist
+        - scientific operations specialist
+      study_development_operations:
+        - study operations associate
+        - study operations coordinator
+        - study operations specialist
+        - clinical study coordinator
+        - clinical study operations associate
+        - clinical study operations coordinator
+        - clinical study operations specialist
+        - clinical development coordinator
+        - clinical development associate
+        - clinical development operations associate
+        - clinical development operations coordinator
+        - development operations coordinator
+        - development operations associate
+      study_startup_activation:
+        - study startup specialist
+        - study startup associate
+        - study startup coordinator
+        - site activation specialist
+        - site activation associate
+        - site activation coordinator
+        - clinical startup specialist
+        - startup specialist
+      study_regulatory:
+        - regulatory coordinator - clinical trials
+        - clinical regulatory coordinator
+        - clinical regulatory associate
+        - study regulatory coordinator
+        - study regulatory specialist
+        - regulatory startup specialist
+      clinical_data_coordination:
+        - clinical data coordinator
+        - clinical data associate
+        - clinical data specialist
+        - clinical data management associate
+        - clinical data management coordinator
+        - data coordinator - clinical trials
+        - clinical trial data coordinator
+      cro_proposals:
+        - proposals development associate
+        - proposal development associate
+        - proposal associate
+        - proposal coordinator
+        - clinical proposal associate
+        - clinical proposal coordinator
+        - proposal development coordinator
+      life_science_project_program:
+        - r&d project coordinator
+        - r&d program coordinator
+        - drug development project coordinator
+        - drug development program coordinator
+        - development project coordinator
+        - development program coordinator
+        - technical project coordinator - life sciences
+        - project associate - clinical development
+        - project associate - drug development
+        - project coordinator - clinical development
+        - program associate - clinical development
     # Description evidence can qualify any title or job family.
     # Operational Excellence titles require this evidence.
     responsibility_terms:

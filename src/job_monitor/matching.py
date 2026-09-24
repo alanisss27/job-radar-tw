@@ -4,6 +4,7 @@ import html
 import re
 
 from .config import ProfileConfig, SearchPreferences
+from .discovery import contextual_title_evidence
 from .eligibility import assess_candidate, work_arrangement
 from .models import (
     CandidateProfile,
@@ -957,7 +958,11 @@ def _match_discovery(
     clinical_project_support_hits: set[str] = set()
     clinical_trial_manager_hits: set[str] = set()
     transferable_pm_hits: set[str] = set()
+    contextual_title_hits: set[str] = set()
     if profile.name == "clinical-discovery":
+        contextual_title_hits = contextual_title_evidence(
+            job.raw.title, job.raw.description_raw, profile.contextual_title_families
+        )
         clinical_trial_manager_hits = _clinical_trial_manager_evidence(
             job.raw.title, job.raw.description_raw
         )
@@ -975,6 +980,7 @@ def _match_discovery(
         or clinical_project_support_hits
         or clinical_trial_manager_hits
         or transferable_pm_hits
+        or contextual_title_hits
     )
     if (
         profile.allow_other_job_family
@@ -1058,6 +1064,8 @@ def _match_discovery(
         )
     if transferable_pm_hits:
         reasons.append("transferable life-science PM: " + ", ".join(sorted(transferable_pm_hits)))
+    if contextual_title_hits:
+        reasons.append("discovery title family: " + ", ".join(sorted(contextual_title_hits)))
     gaps = []
     penalty = 0.0
     if candidate:

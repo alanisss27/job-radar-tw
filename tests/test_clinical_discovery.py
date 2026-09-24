@@ -220,7 +220,7 @@ def test_statistics_and_sas_titles_are_excluded_from_responsibility_fallback(tit
 
 def test_one_responsibility_hit_is_not_enough():
     result = match(
-        "Clinical Data Specialist",
+        "Clinical Feasibility Specialist",
         "Coordinate projects for clinical operations.",
     )
     assert not result.eligible
