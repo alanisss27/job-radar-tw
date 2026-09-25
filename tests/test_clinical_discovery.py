@@ -495,6 +495,8 @@ def test_discovery_configuration_and_company_scope():
 
     assigned = {slug for slug, company in COMPANIES.items() if PROFILE.name in company.profiles}
     assert assigned == {
+        "sumitomo-pharma-america",
+        "beacon-biosignals",
         "komodo-health",
         "orca-bio",
         "praxis-precision-medicines",

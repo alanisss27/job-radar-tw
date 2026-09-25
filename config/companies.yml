@@ -1,6 +1,36 @@
 # Registry entries are intentionally explicit. `source_verified` means a live API
 # response has been checked, not merely that the company is a desired target.
 companies:
+  # Wave 1, verified 2026-09-24. SMPA exposes location facets, not a country facet;
+  # enumerate the official board and retain full detail/location evidence.
+  - slug: sumitomo-pharma-america
+    name: Sumitomo Pharma America
+    careers_url: https://sumitomopharma.wd5.myworkdayjobs.com/SMPA
+    ats_type: workday
+    ats_config:
+      endpoint: https://sumitomopharma.wd5.myworkdayjobs.com/wday/cxs/sumitomopharma/SMPA/jobs
+      site: sumitomopharma.wd5.myworkdayjobs.com
+      detail_base_url: https://sumitomopharma.wd5.myworkdayjobs.com/en-US/SMPA
+      detail_api_base: https://sumitomopharma.wd5.myworkdayjobs.com/wday/cxs/sumitomopharma/SMPA
+      limit: 20
+    industry: pharmaceutical
+    profiles: [clinical-discovery]
+    priority: 1
+    enabled: true
+    source_verified: true
+  # Greenhouse returns full posting content with the listing, including remote
+  # restrictions. Preserve those facts rather than interpreting Remote as US-wide.
+  - slug: beacon-biosignals
+    name: Beacon Biosignals
+    careers_url: https://job-boards.greenhouse.io/beaconbiosignals
+    ats_type: greenhouse
+    ats_config:
+      board_token: beaconbiosignals
+    industry: biotech
+    profiles: [clinical-discovery]
+    priority: 2
+    enabled: true
+    source_verified: true
   # SCRI's official careers page links to this dedicated McKesson Workday board.
   # U.S. country facet and detail enrichment verified 2026-09-21.
   - slug: mckesson-scri
