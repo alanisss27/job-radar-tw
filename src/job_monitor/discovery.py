@@ -17,7 +17,8 @@ _DOMAIN = re.compile(
     r"\b(?:clinical (?:trials?|stud(?:y|ies)|research|development|operations)|"
     r"life[ -]sciences?|pharma(?:ceutical)?s?|biotech(?:nology)?|biopharma(?:ceutical)?|"
     r"drug development|contract research organi[sz]ation|cro|"
-    r"biomedical|translational research)\b"
+    r"biomedical|translational research|preclinical|biosample|biospecimen|"
+    r"biomarker|bioanalytical)\b"
 )
 _STUDY_WORK = re.compile(
     r"\b(?:irb|iec|e?tmf|trial master files?|essential documents?|site activation|"
@@ -45,9 +46,17 @@ _SPECIALIST_REQUIREMENT = re.compile(
     re.I,
 )
 _TITLE_EXCLUSIONS = re.compile(
-    r"\b(?:senior|sr\.?|lead|manager|director|head|principal|vp|president|"
-    r"irt|rtsm|cmc|manufacturing|software|it|construction|marketing|advertising|"
+    r"\b(?:irt|rtsm|cmc|manufacturing|software|it|construction|marketing|advertising|"
     r"sales|patient services?|scheduling|administrative)\b"
+)
+_OPERATIONS_EVIDENCE = re.compile(
+    r"\b(?:coordinat\w*|track\w*|reconcil\w*|manag\w*|plann\w*|"
+    r"deliverables?|timelines?|milestones?|cross[ -]functional|study team|"
+    r"vendor|cro|central laborator\w*|specialty laborator\w*|"
+    r"chain of custody|sample lifecycle|sample management|sample tracking|"
+    r"project (?:plans?|coordination|management)|documentation|"
+    r"proposals?|bids?|rfp|request for proposal)\b",
+    re.I,
 )
 
 
@@ -93,6 +102,14 @@ def contextual_title_evidence(
             if family == "study_regulatory" and not _STUDY_WORK.search(context):
                 continue
             if _normalize(term) == "clinical study coordinator" and not _STUDY_WORK.search(context):
+                continue
+            if family in {
+                "contextual_project_support",
+                "regulated_quality_operations",
+                "clinical_data_operations",
+            } and not _OPERATIONS_EVIDENCE.search(context):
+                continue
+            if family == "biosample_biomarker_operations" and not _OPERATIONS_EVIDENCE.search(context):
                 continue
             hits.add(f"{family}: {term}")
     return hits

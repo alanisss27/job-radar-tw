@@ -1,6 +1,6 @@
 profiles:
   - name: clinical-discovery
-    version: "1.2"
+    version: "1.3"
     # Assign only to relevant healthcare/life-science employers.
     # Scores indicate discovery evidence, not candidate fit.
     threshold: 0.70
@@ -46,6 +46,30 @@ profiles:
     weights: {title: 0.70, domain: 0.30}
     title_terms:
       - clinical project manager
+      - associate clinical project manager
+      - clinical project associate
+      - clinical project specialist
+      - clinical study associate
+      - clinical study specialist
+      - clinical study manager
+      - clinical program associate
+      - clinical trial assistant
+      - clinical trials assistant
+      - trial assistant
+      - clinical trial coordinator
+      - clinical research project coordinator
+      - clinical research project manager
+      - associate clinical trial manager
+      - clinical trial manager
+      - senior clinical trial associate
+      - project coordinator, clinical research
+      - project coordinator clinical research
+      - project coordinator, phase i
+      - project coordinator phase i
+      - early phase project coordinator
+      - phase i project coordinator
+      - senior project coordinator, clinical research
+      - senior project coordinator clinical research
       - associate project manager — clinical
       - associate project manager - clinical
       - associate project manager — life sciences
@@ -58,6 +82,61 @@ profiles:
       - clinical operations associate
       - clinical operations specialist
       - clinical trial associate
+      - associate project manager, drug development
+      - associate project manager drug development
+      - project manager, drug development
+      - project manager drug development
+      - drug development project coordinator
+      - drug development project associate
+      - drug development project specialist
+      - development project coordinator
+      - development project associate
+      - development project specialist
+      - development operations associate
+      - development operations coordinator
+      - development operations specialist
+      - clinical development specialist
+      - clinical development project coordinator
+      - clinical development project associate
+      - program coordinator, drug development
+      - program coordinator drug development
+      - program associate, drug development
+      - program associate drug development
+      - program specialist, drug development
+      - program specialist drug development
+      - r&d project coordinator
+      - r&d project associate
+      - r&d project specialist
+      - r&d project manager
+      - biosample operations associate
+      - biosample operations specialist
+      - biosample operations coordinator
+      - biosample operations manager
+      - biospecimen operations associate
+      - biospecimen operations specialist
+      - biospecimen operations coordinator
+      - clinical sample operations
+      - clinical sample management
+      - sample operations coordinator
+      - sample operations specialist
+      - sample management coordinator
+      - sample management specialist
+      - biomarker operations associate
+      - biomarker operations specialist
+      - biomarker operations coordinator
+      - biomarker project coordinator
+      - biomarker project manager
+      - clinical biomarker operations
+      - clinical biomarker project coordinator
+      - clinical biomarker project manager
+      - bioanalytical project coordinator
+      - bioanalytical project manager
+      - bioanalytical operations coordinator
+      - bioanalytical operations specialist
+      - laboratory project coordinator
+      - laboratory project manager
+      - clinical laboratory project coordinator
+      - clinical laboratory project manager
       - clinical operations project specialist
       - gxp project coordinator
       - gxp project manager
@@ -69,6 +148,38 @@ profiles:
       - validation project manager
       - scientific project manager
       - scientific program coordinator
+      - scientific program associate
+      - scientific operations manager
+      - research project manager
+      - research operations manager
+      - preclinical project coordinator
+      - preclinical project manager
+      - preclinical operations coordinator
+      - preclinical operations specialist
+      - life sciences project coordinator
+      - life sciences project manager
+      - biotech project coordinator
+      - biotech project manager
+      - glp project coordinator
+      - glp project specialist
+      - glp project manager
+      - gxp project specialist
+      - quality project coordinator
+      - quality project specialist
+      - quality systems project coordinator
+      - quality systems project specialist
+      - quality operations coordinator
+      - quality operations specialist
+      - compliance project coordinator
+      - compliance project specialist
+      - compliance operations coordinator
+      - compliance operations specialist
+      - validation project specialist
+      - validation operations coordinator
+      - validation operations specialist
+      - document control project coordinator
+      - quality documentation specialist
+      - gxp documentation specialist
       - gmp operations manager
       - gxp operations manager
       - gmp/gxp operations manager
@@ -148,7 +259,134 @@ profiles:
         - project associate - drug development
         - project coordinator - clinical development
         - program associate - clinical development
-    # Description evidence can qualify any title or job family.
+      clinical_research_variants:
+        - clinical project coordinator
+        - clinical project associate
+        - clinical project specialist
+        - clinical trial project coordinator
+        - clinical study associate
+        - clinical study specialist
+        - clinical study manager
+        - clinical operations coordinator
+        - clinical trial assistant
+        - clinical trials assistant
+        - trial assistant
+        - clinical trial coordinator
+        - clinical research project coordinator
+        - clinical research project manager
+        - associate clinical trial manager
+        - clinical trial manager
+        - senior clinical trial associate
+        - associate clinical project manager
+      biosample_biomarker_operations:
+        - biosample operations associate
+        - biosample operations specialist
+        - biosample operations coordinator
+        - biosample operations manager
+        - biospecimen operations associate
+        - biospecimen operations specialist
+        - biospecimen operations coordinator
+        - clinical sample operations
+        - clinical sample management
+        - sample operations coordinator
+        - sample operations specialist
+        - sample management coordinator
+        - sample management specialist
+        - biomarker operations associate
+        - biomarker operations specialist
+        - biomarker operations coordinator
+        - biomarker project coordinator
+        - biomarker project manager
+        - clinical biomarker operations
+        - clinical biomarker project coordinator
+        - clinical biomarker project manager
+        - bioanalytical project coordinator
+        - bioanalytical project manager
+        - bioanalytical operations coordinator
+        - bioanalytical operations specialist
+        - laboratory project coordinator
+        - laboratory project manager
+        - clinical laboratory project coordinator
+        - clinical laboratory project manager
+      drug_development_operations:
+        - drug development project coordinator
+        - drug development project associate
+        - drug development project specialist
+        - development project coordinator
+        - development project associate
+        - development project specialist
+        - development operations associate
+        - development operations coordinator
+        - development operations specialist
+        - clinical development specialist
+        - clinical development project coordinator
+        - clinical development project associate
+        - program coordinator drug development
+        - program associate drug development
+        - program specialist drug development
+        - r&d project coordinator
+        - r&d project associate
+        - r&d project specialist
+        - r&d project manager
+        - associate project manager drug development
+        - project manager drug development
+      scientific_preclinical_operations:
+        - scientific program associate
+        - scientific operations manager
+        - research project manager
+        - research operations manager
+        - preclinical project coordinator
+        - preclinical project manager
+        - preclinical operations coordinator
+        - preclinical operations specialist
+        - life sciences project coordinator
+        - life sciences project manager
+        - biotech project coordinator
+        - biotech project manager
+      regulated_quality_operations:
+        - glp project coordinator
+        - glp project specialist
+        - glp project manager
+        - gxp project specialist
+        - quality project coordinator
+        - quality project specialist
+        - quality systems project coordinator
+        - quality systems project specialist
+        - quality operations coordinator
+        - quality operations specialist
+        - compliance project coordinator
+        - compliance project specialist
+        - compliance operations coordinator
+        - compliance operations specialist
+        - validation project specialist
+        - validation operations coordinator
+        - validation operations specialist
+        - document control project coordinator
+        - quality documentation specialist
+        - gxp documentation specialist
+      contextual_project_support:
+        - project coordinator
+        - senior project coordinator
+        - project associate
+        - project specialist
+        - senior project specialist
+        - project support specialist
+        - senior project specialist
+        - program coordinator
+        - program associate
+        - proposal development associate
+        - proposal development specialist
+        - proposal coordinator
+        - proposal specialist
+        - clinical data project coordinator
+        - clinical data operations coordinator
+        - clinical data operations specialist
+      clinical_data_operations:
+        - clinical data project coordinator
+        - clinical data operations coordinator
+        - clinical data operations specialist
+        - clinical data project coordinator
+      # Description evidence can qualify any title or job family.
     # Operational Excellence titles require this evidence.
     responsibility_terms:
       - manage projects
@@ -179,6 +417,13 @@ profiles:
       - gmp
       - gxp
       - validation
+      - cro
+      - translational research
+      - preclinical
+      - biomarker
+      - biosample
+      - biospecimen
+      - bioanalytical
     skills: []
     gap_terms: {}
 

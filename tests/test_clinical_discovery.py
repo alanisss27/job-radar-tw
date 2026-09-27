@@ -188,6 +188,8 @@ def test_responsibilities_qualify_without_pm_title(title):
             "Coordinate projects across teams. Track project milestones for clinical operations.",
         )
     )
+
+
     result = match_job(parsed, PROFILE, PREFERENCES)
 
     assert result.eligible
@@ -198,6 +200,72 @@ def test_responsibilities_qualify_without_pm_title(title):
     )
 
 
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Clinical Study Manager",
+        "Associate Clinical Trial Manager",
+        "Senior Clinical Trial Associate",
+        "Clinical Project Specialist",
+        "Clinical Trials Assistant",
+        "Drug Development Project Specialist",
+        "Clinical Development Project Associate",
+        "R&D Project Manager",
+        "Biosample Operations Specialist",
+        "Clinical Biomarker Project Coordinator",
+        "Bioanalytical Operations Coordinator",
+        "Clinical Laboratory Project Manager",
+        "Preclinical Project Manager",
+        "Research Operations Manager",
+        "Biotech Project Coordinator",
+        "GLP Project Specialist",
+        "Quality Systems Project Coordinator",
+        "Compliance Project Specialist",
+        "Validation Operations Coordinator",
+    ],
+)
+def test_expanded_life_science_title_families_discover(title):
+    result = match(title)
+    assert result.eligible, (title, result.filtered_reason)
+
+
+@pytest.mark.parametrize(
+    ("title", "description"),
+    [
+        (
+            "Senior Project Specialist",
+            "At a biotech CRO, coordinate clinical study milestones, vendors, and deliverables.",
+        ),
+        (
+            "Clinical Data Operations Specialist",
+            "Coordinate cross-functional study teams and track clinical study timelines and deliverables.",
+        ),
+        (
+            "Biospecimen Operations Associate",
+            "Coordinate sample lifecycle tracking, reconciliation, and central laboratory vendors for clinical trials.",
+        ),
+        (
+            "Proposal Development Specialist",
+            "Coordinate RFP proposals for clinical research and drug development programs.",
+        ),
+    ],
+)
+def test_contextual_support_titles_require_life_science_work(title, description):
+    assert match(title, description).eligible
+
+
+@pytest.mark.parametrize(
+    ("title", "description"),
+    [
+        ("Project Coordinator", "Coordinate software releases for an IT platform."),
+        ("Proposal Specialist", "Prepare commercial sales proposals and marketing collateral."),
+        ("Senior Project Specialist", "Coordinate generic corporate initiatives and budgets."),
+        ("Clinical Data Operations Specialist", "Perform database programming and data entry."),
+        ("Laboratory Technician", "Perform bench assays and sample accessioning."),
+    ],
+)
+def test_expanded_discovery_keeps_unrelated_and_execution_only_titles_out(title, description):
+    assert not match(title, description).eligible
 @pytest.mark.parametrize(
     "title",
     [
@@ -363,7 +431,6 @@ def test_operational_excellence_requires_responsibility_evidence():
     "title",
     [
         "Nonclinical Project Manager",
-        "Preclinical Project Manager",
         "Trial Associateship",
         "Operations Specialistship",
     ],
