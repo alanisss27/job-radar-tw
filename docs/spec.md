@@ -55,7 +55,7 @@
 - 是新職缺；
 - 達到強匹配與即時通知最低分數；
 - 通過 preferences 中的硬性排除條件；
-- 來源日期未超過新鮮度上限；
+- Posting age is metadata only, never an eligibility or notification cutoff.
 - 尚未以相同 job／profile／content hash 通知過。
 
 候選過多時依分數排序，只送出單次上限內的項目。其餘候選留在 outbox，由之後的 run 繼續處理。
@@ -72,8 +72,8 @@ Telegram Bot API 不提供 idempotency key，因此這裡採「至少傳送一�
 
 ## 排程與冪等
 
-- 預設目標時間為每天 20:00 `America/New_York`。
-- GitHub workflow 以多個錯開整點的 cron 作為備援；延遲送達的排程可在次日上午以前沿用前一天的 daily key。
+- Scan: 07:30 America/New_York, targeting completion before 09:00. The sequential job waits until 09:00 for delivery; late scans send immediately.
+- Backup triggers: 08:30 and 09:30, sharing the daily key. America/New_York handles DST.
 - `source_runs.run_key` 唯一。相同 key 已成功或仍在執行中時，後續觸發回傳 `duplicate_run_key`；失敗、部分失敗或超過逾時上限的 run，可由後續觸發重新取得執行權。
 - 手動 workflow 未指定 key 時，使用 GitHub run ID 與 attempt 產生唯一 key。
 - workflow 上限 60 分鐘，monitor 指令於 45 分鐘中止，保留發送失敗通知的時間。

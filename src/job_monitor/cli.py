@@ -134,6 +134,7 @@ def run_command(
             backfill=backfill,
             suppress_notifications=suppress_notifications,
             run_key=run_key,
+            scheduled=scheduled,
         )
     )
     _print_report(report)

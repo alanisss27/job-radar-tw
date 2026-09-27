@@ -15,8 +15,8 @@ def scheduled_run_key(
     now: datetime | None = None,
     *,
     timezone: str = "America/New_York",
-    hour: int = 20,
-    grace_hours: int = 16,
+    hour: int = 7,
+    grace_hours: int = 4,
 ) -> str | None:
     scheduled_date = _scheduled_date(
         now,
@@ -33,8 +33,8 @@ def is_scheduled_window(
     now: datetime | None = None,
     *,
     timezone: str = "America/New_York",
-    hour: int = 20,
-    grace_hours: int = 16,
+    hour: int = 7,
+    grace_hours: int = 4,
 ) -> bool:
     return (
         _scheduled_date(
@@ -61,3 +61,10 @@ def _scheduled_date(
     if current - target >= timedelta(hours=grace_hours):
         return None
     return target.date()
+
+
+def notification_delay(now: datetime | None = None, *, timezone: str = "America/New_York") -> float:
+    """Wait until today's 09:00 locally; delayed scans deliver immediately."""
+    current = (now or datetime.now(UTC)).astimezone(ZoneInfo(timezone))
+    target = current.replace(hour=9, minute=0, second=0, microsecond=0)
+    return max(0.0, target.timestamp() - current.timestamp())

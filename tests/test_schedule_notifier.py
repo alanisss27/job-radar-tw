@@ -43,10 +43,11 @@ def test_summary_shows_structured_source_warnings_only_when_present():
     assert "https://example.test/job/1" in summary
 
 
-def test_et_schedule_handles_dst():
-    assert is_scheduled_window(datetime(2026, 6, 18, 0, 0, tzinfo=UTC))
-    assert is_scheduled_window(datetime(2026, 1, 18, 1, 0, tzinfo=UTC))
-    assert is_scheduled_window(datetime(2026, 6, 18, 6, 0, tzinfo=UTC))
+@pytest.mark.parametrize("month,utc_hour", [(1, 12), (6, 11)])
+def test_et_schedule_handles_dst(month, utc_hour):
+    now = datetime(2026, month, 18, utc_hour, 30, tzinfo=UTC)
+    assert is_scheduled_window(now)
+    assert scheduled_run_key(now) == f"daily-2026-{month:02d}-18"
 
 
 def test_run_key_uses_et_date():
@@ -54,15 +55,35 @@ def test_run_key_uses_et_date():
 
 
 def test_scheduled_run_key_handles_delayed_github_delivery():
-    assert scheduled_run_key(datetime(2026, 6, 18, 0, 17, tzinfo=UTC)) == "daily-2026-06-17"
-    assert scheduled_run_key(datetime(2026, 6, 18, 6, 6, tzinfo=UTC)) == "daily-2026-06-17"
-    assert scheduled_run_key(datetime(2026, 6, 18, 23, 30, tzinfo=UTC)) is None
-    assert scheduled_run_key(datetime(2026, 6, 19, 0, 30, tzinfo=UTC)) == "daily-2026-06-18"
+    assert scheduled_run_key(datetime(2026, 6, 18, 13, 30, tzinfo=UTC)) == "daily-2026-06-18"
+    assert scheduled_run_key(datetime(2026, 6, 18, 15, 0, tzinfo=UTC)) is None
 
 
 def test_scheduled_run_key_skips_before_et_window():
-    assert scheduled_run_key(datetime(2026, 1, 18, 0, 17, tzinfo=UTC)) is None
-    assert scheduled_run_key(datetime(2026, 1, 18, 1, 17, tzinfo=UTC)) == "daily-2026-01-17"
+    assert scheduled_run_key(datetime(2026, 1, 18, 11, 59, tzinfo=UTC)) is None
+
+
+@pytest.mark.parametrize("month,utc_hour", [(1, 12), (6, 11), (3, 11), (11, 12)])
+def test_notification_wait_targets_nine_eastern(month, utc_hour):
+    from job_monitor.schedule import notification_delay
+    assert notification_delay(datetime(2026, month, 18, utc_hour, 30, tzinfo=UTC)) == 5400
+    assert notification_delay(datetime(2026, month, 18, utc_hour + 2, 0, tzinfo=UTC)) == 0
+
+
+def test_workflow_starts_early_and_allows_wait_until_nine():
+    from pathlib import Path
+    import yaml
+
+    workflow = yaml.safe_load(Path(".github/workflows/monitor.yml").read_text(encoding="utf-8"))
+    # PyYAML's YAML 1.1 loader interprets the Actions 'on' key as boolean True.
+    schedule = workflow[True]["schedule"][0]
+    assert schedule == {"cron": "30 7,8,9 * * *", "timezone": "America/New_York"}
+    job = workflow["jobs"]["monitor"]
+    step = next(step for step in job["steps"] if step.get("name") == "Run scheduled monitor")
+    assert step["env"]["MONITOR_TIMEZONE"] == "America/New_York"
+    assert step["env"]["MONITOR_HOUR"] == "7"
+    assert "110m uv run monitor run --scheduled" in step["run"]
+    assert job["timeout-minutes"] == 120
 
 
 def test_schedule_accepts_custom_timezone_hour_and_grace_period():
@@ -164,7 +185,7 @@ def test_job_message_includes_freshness():
     assert source_age_days(raw.posted_at, datetime(2026, 6, 26, tzinfo=UTC)) == 1
 
 
-def test_immediate_notification_gate_requires_fresh_new_strong_match():
+def test_immediate_notification_gate_requires_new_strong_match_regardless_of_age():
     settings = Settings(
         immediate_notification_min_score=0.82,
         immediate_notification_max_source_age_days=14,
@@ -195,7 +216,7 @@ def test_immediate_notification_gate_requires_fresh_new_strong_match():
         settings,
         is_new=False,
     )
-    assert not _qualifies_for_immediate_notification(
+    assert _qualifies_for_immediate_notification(
         job,
         result,
         datetime(2026, 7, 20, tzinfo=UTC),
@@ -215,7 +236,7 @@ def test_backfill_gate_allows_old_existing_strong_match_above_threshold():
         title="Data Analyst",
         location_raw="Austin, TX",
         description_raw="SQL analytics",
-        posted_at=datetime(2026, 6, 20, tzinfo=UTC),
+        posted_at=datetime(2020, 1, 1, tzinfo=UTC),
         url="https://example.com/jobs/1",
     )
     result = MatchResult(profile="custom", score=0.9, eligible=True, tier="strong")
@@ -256,17 +277,12 @@ def test_backfill_gate_allows_old_existing_strong_match_above_threshold():
         ),
         (
             MatchResult(profile="custom", score=0.9, eligible=True, tier="strong"),
-            datetime(2025, 1, 1, tzinfo=UTC),
-            True,
-        ),
-        (
-            MatchResult(profile="custom", score=0.9, eligible=True, tier="strong"),
             datetime(2026, 6, 20, tzinfo=UTC),
             False,
         ),
     ],
 )
-def test_backfill_gate_keeps_score_tier_age_and_newness_gates(
+def test_backfill_gate_keeps_score_tier_and_newness_gates(
     result,
     posted_at,
     backfill,

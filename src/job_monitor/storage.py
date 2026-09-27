@@ -555,6 +555,32 @@ class Storage:
             )
             return finished.rowcount == 1
 
+    def age_suppressed_job_ids(self, company_id: str, legacy_days: int, min_score: float) -> set[str]:
+        """Infer legacy alert suppression; never use this age test for eligibility.
+
+        The old gate stored no rejection reason. Require a current strong eligible
+        target match, no sent/queued alert, and age above the old limit at discovery.
+        The caller intersects these IDs with a fresh verified official-source fetch.
+        """
+        with self.engine.connect() as conn:
+            rows = conn.execute(
+                select(jobs.c.id, jobs.c.source_posted_at, jobs.c.first_seen_at,
+                       match_results.c.details)
+                .join(match_results, and_(match_results.c.job_id == jobs.c.id,
+                                         match_results.c.content_hash == jobs.c.content_hash))
+                .where(jobs.c.company_id == company_id, jobs.c.status == "active",
+                       jobs.c.source_posted_at.is_not(None), match_results.c.eligible.is_(True),
+                       match_results.c.tier == "strong", match_results.c.score >= min_score,
+                       ~exists(select(notifications.c.id).where(notifications.c.job_id == jobs.c.id)),
+                       ~exists(select(notification_outbox.c.id).where(notification_outbox.c.job_id == jobs.c.id)))
+            ).mappings().all()
+        return {
+            row["id"] for row in rows
+            if row["details"].get("bucket", "target") == "target"
+            and (row["first_seen_at"].replace(tzinfo=UTC)
+                 - row["source_posted_at"].replace(tzinfo=UTC)).days > legacy_days
+        }
+
     def has_jobs(self, company_id: str) -> bool:
         with self.engine.connect() as conn:
             return bool(

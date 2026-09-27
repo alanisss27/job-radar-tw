@@ -69,7 +69,7 @@ of it is acceptable. State-only or city-only entries never approve commuting.
 The checked-in public configuration enables assessment with unknown facts. The
 private configuration does not automatically propagate to deployment; provision
 it privately when deploying. National US-remote opportunities do not require a
-commuting policy. No historical matches are automatically reevaluated.
+commuting policy. Only the targeted posting-age migration below automatically reevaluates historical matches.
 
 ## Attendance and location interpretation
 
@@ -106,7 +106,7 @@ License jurisdiction, expiration and compact privileges are not certified.
 ## Notifications
 
 Immediate alerts require explicitly eligible assessments plus existing discovery,
-score, freshness and target-bucket checks. Pending alerts recheck the exact stored
+score and target-bucket checks. Pending alerts recheck the exact stored
 posting version against current candidate facts before claiming and before sending.
 Both review-needed and unsuitable records block delivery. The queue retains reasons
 and does not let blocked entries consume the delivery cap.
@@ -129,4 +129,23 @@ needs human review and possibly a regression fixture. No Census dataset or resol
 is required or planned by this simplified implementation.
 
 Tests use synthetic postings, mocked sources/notifiers and temporary local SQLite
-only. A future production reevaluation requires separate authorization.
+only. The targeted migration below runs automatically on deployment.
+
+## Posting age and one-time reconsideration
+
+Posting age is context only: there is no maximum age for eligibility or alerts.
+The former 21-day alert cutoff (not a 30-day eligibility gate) is removed.
+`IMMEDIATE_NOTIFICATION_MAX_SOURCE_AGE_DAYS` is retained only to identify legacy
+suppression, including installations that customized its value.
+
+On the next notifying run, each verified official source gets one reconsideration
+pass after a successful fetch. Stored active, strong, eligible target matches above
+the alert score threshold, too old at first discovery under the former setting,
+and with no queued or sent alert are candidates. Legacy suppression was not logged
+explicitly, so this is inferred from those stored facts. Only candidates returned
+again by the current official employer/ATS source are reevaluated with all current
+matching gates. Aggregator history alone is never used. Existing source availability
+checks and closed/missing handling remain in force; closed history is not replayed.
+A durable `posting-age-v1-<company-id>` run marker prevents repeat reconsideration;
+failed source fetches retry on a later run. Outbox deduplication and caps still apply.
+No production scan is required to deploy this migration.

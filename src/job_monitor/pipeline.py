@@ -18,10 +18,9 @@ from .notifier import (
     render_failure_alert,
     render_job_message,
     render_run_summary,
-    source_age_days,
 )
 from .resume import load_resume
-from .schedule import local_run_key
+from .schedule import local_run_key, notification_delay
 from .sources import SourceRunner
 from .storage import PERSIST_CHUNK_SIZE, JobIndexRow, JobPlan, MatchDecision, Storage
 
@@ -190,8 +189,7 @@ def _qualifies_for_immediate_notification(
         return False
     if result.tier != "strong" or result.score < settings.immediate_notification_min_score:
         return False
-    age = source_age_days(parsed.raw.posted_at, first_seen_at)
-    return age is None or age <= settings.immediate_notification_max_source_age_days
+    return True
 
 
 def _safe_error(exc: BaseException, settings: Settings) -> str:
@@ -219,6 +217,7 @@ async def run_pipeline(
     backfill: bool = False,
     suppress_notifications: bool = False,
     run_key: str | None = None,
+    scheduled: bool = False,
 ) -> RunReport:
     key = run_key or local_run_key(timezone=settings.monitor_timezone)
     report = RunReport(run_key=key)
@@ -231,7 +230,7 @@ async def run_pipeline(
     storage = None if dry_run else Storage(settings.database_url or "", create_schema=False)
     run_id = "dry-run"
     if storage:
-        claim = storage.claim_run(key)
+        claim = storage.claim_run(key, **({"stale_after_minutes": 120} if scheduled else {}))
         if claim is None:
             report.skipped_reason = "duplicate_run_key"
             logger.warning("Run %s already completed or is in progress; skipping fetch", key)
@@ -303,6 +302,17 @@ async def run_pipeline(
                 company_started = perf_counter()
                 use_batch = storage is not None and _supports_batch_persistence(storage)
                 job_index = storage.prefetch_job_index(company_id) if use_batch else {}
+                # Only current official-source results can enter this migration.
+                age_claim = None
+                age_candidates = set()
+                if use_batch and company.source_verified and not baseline and notifier:
+                    age_claim = storage.claim_run(f"posting-age-v1-{company_id}")
+                    if age_claim:
+                        age_candidates = storage.age_suppressed_job_ids(
+                            company_id,
+                            settings.immediate_notification_max_source_age_days,
+                            settings.immediate_notification_min_score,
+                        )
                 batch = (
                     CompanyBatchPersistence(
                         storage=storage,
@@ -341,7 +351,8 @@ async def run_pipeline(
                             content_hash=raw.content_hash,
                             first_seen_at=plan.first_seen_at,
                         )
-                    if not plan.changed and not backfill:
+                    age_backfill = plan.job_id in age_candidates
+                    if not plan.changed and not backfill and not age_backfill:
                         if use_batch:
                             batch.add(raw, plan, [], [])
                             continue
@@ -411,7 +422,7 @@ async def run_pipeline(
                                     plan.first_seen_at,
                                     settings,
                                     is_new=plan.is_new,
-                                    backfill=backfill,
+                                    backfill=backfill or age_backfill,
                                 )
                             )
                             if should_notify:
@@ -456,6 +467,8 @@ async def run_pipeline(
                         batch.flush()
                     report.jobs_closed += storage.mark_missing(company_id, run_id)
                     storage.source_succeeded(company_id, run_id)
+                    if age_claim:
+                        storage.finish_run(age_claim.run_id, {}, [])
                     logger.info(
                         "Persisted company %s: jobs_fetched=%d new=%d changed=%d "
                         "unchanged=%d elapsed_seconds=%.2f",
@@ -467,6 +480,9 @@ async def run_pipeline(
                         perf_counter() - company_started,
                     )
                 report.sources_succeeded += 1
+
+            if notifier and scheduled:
+                await asyncio.sleep(notification_delay(timezone=settings.monitor_timezone))
 
             if notifier and storage:
                 pending_before_delivery = storage.pending_notification_count()

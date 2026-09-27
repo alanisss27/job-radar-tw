@@ -114,7 +114,7 @@ Token 等同 bot 密碼。如果不小心貼到公開頁面，請立刻回到 Bo
 
 超過上限的項目會留在 outbox，之後的 run 會繼續傳送。想加快進度也可以再手動執行，留空的 `run_key` 會自動產生。Backfill 不會到網站追溯已下架的歷史職缺。
 
-確認手動執行正常後就不用再操作。預設排程約在每天美東時間 20:00 開始，workflow 會安排數次備援觸發；`run_key` 會略過已成功或仍在執行的同日 run，失敗或逾時的 run 則可由下一次觸發重試。GitHub 排程可能延遲，不適合當成即時告警。
+Daily scans start at 07:30 America/New_York, targeting completion before 09:00. The sequential job waits until 09:00 to deliver notifications; late scans deliver immediately. Backup triggers at 08:30 and 09:30 share the daily key. DST is automatic; GitHub scheduling delays remain possible.
 
 ## 日常查看
 
@@ -191,7 +191,7 @@ uv run monitor export-handoff [--days 7] [--limit 40] [--out handoff/latest.md]
 
 **`matches > 0`，但 `notifications = 0`**
 
-第一次 baseline、本次只有舊職缺，或新職缺沒有通過即時通知的強匹配／新鮮度規則，都會出現這個結果。Daily Summary 仍會保留符合門檻的清單；若要補送 baseline，可手動勾選 `backfill`。
+Baseline runs and jobs failing the existing strong-match gates may produce no individual alerts. Posting age never excludes a job. Daily summaries retain matching jobs; manual backfill can notify baseline jobs.
 
 **`skipped_reason: duplicate_run_key`**
 

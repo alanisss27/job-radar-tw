@@ -2,8 +2,9 @@ name: Job Radar TW
 
 on:
   schedule:
+    # Start at 07:30 ET; 08:30/09:30 retry failures. Delivery waits until 09:00.
     # Keep this timezone and MONITOR_TIMEZONE below in sync when you customize the schedule.
-    - cron: "17,47 20-22 * * *"
+    - cron: "30 7,8,9 * * *"
       timezone: "America/New_York"
   workflow_dispatch:
     inputs:
@@ -36,7 +37,7 @@ concurrency:
 jobs:
   monitor:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -68,9 +69,9 @@ jobs:
           OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
           LLM_ENABLED: ${{ vars.LLM_ENABLED || 'false' }}
           VISA_SPONSORSHIP_REQUIRED: ${{ vars.VISA_SPONSORSHIP_REQUIRED || 'false' }}
-          MONITOR_TIMEZONE: ${{ vars.MONITOR_TIMEZONE || 'America/New_York' }}
-          MONITOR_HOUR: ${{ vars.MONITOR_HOUR || '20' }}
-          SCHEDULE_GRACE_HOURS: ${{ vars.SCHEDULE_GRACE_HOURS || '16' }}
+          MONITOR_TIMEZONE: America/New_York
+          MONITOR_HOUR: "7"
+          SCHEDULE_GRACE_HOURS: "4"
           IMMEDIATE_NOTIFICATION_MIN_SCORE: ${{ vars.IMMEDIATE_NOTIFICATION_MIN_SCORE || '0.82' }}
           IMMEDIATE_NOTIFICATION_MAX_SOURCE_AGE_DAYS: ${{ vars.IMMEDIATE_NOTIFICATION_MAX_SOURCE_AGE_DAYS || '21' }}
           IMMEDIATE_NOTIFICATION_MAX_PER_RUN: ${{ vars.IMMEDIATE_NOTIFICATION_MAX_PER_RUN || '5' }}
@@ -82,7 +83,7 @@ jobs:
             export RESUME_PATH="$resume_file"
             unset RESUME_TEXT
           fi
-          timeout --signal=INT --kill-after=30s 45m uv run monitor run --scheduled
+          timeout --signal=INT --kill-after=30s 110m uv run monitor run --scheduled
 
       - name: Run manual monitor
         if: github.event_name == 'workflow_dispatch'
@@ -96,9 +97,9 @@ jobs:
           OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
           LLM_ENABLED: ${{ vars.LLM_ENABLED || 'false' }}
           VISA_SPONSORSHIP_REQUIRED: ${{ vars.VISA_SPONSORSHIP_REQUIRED || 'false' }}
-          MONITOR_TIMEZONE: ${{ vars.MONITOR_TIMEZONE || 'America/New_York' }}
-          MONITOR_HOUR: ${{ vars.MONITOR_HOUR || '20' }}
-          SCHEDULE_GRACE_HOURS: ${{ vars.SCHEDULE_GRACE_HOURS || '16' }}
+          MONITOR_TIMEZONE: America/New_York
+          MONITOR_HOUR: "7"
+          SCHEDULE_GRACE_HOURS: "4"
           IMMEDIATE_NOTIFICATION_MIN_SCORE: ${{ vars.IMMEDIATE_NOTIFICATION_MIN_SCORE || '0.82' }}
           IMMEDIATE_NOTIFICATION_MAX_SOURCE_AGE_DAYS: ${{ vars.IMMEDIATE_NOTIFICATION_MAX_SOURCE_AGE_DAYS || '21' }}
           IMMEDIATE_NOTIFICATION_MAX_PER_RUN: ${{ vars.IMMEDIATE_NOTIFICATION_MAX_PER_RUN || '5' }}

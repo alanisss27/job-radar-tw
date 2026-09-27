@@ -99,9 +99,9 @@ The core monitor does not need `SUPABASE_SERVICE_ROLE_KEY`. That key is used onl
 
 The same page has a **Variables** section for optional overrides:
 
-- Schedule: `MONITOR_TIMEZONE`, `MONITOR_HOUR`.
+- Schedule: the workflow pins `America/New_York` and the morning window; local runs use `MONITOR_TIMEZONE`, `MONITOR_HOUR`.
 - Visa requirement: `VISA_SPONSORSHIP_REQUIRED`.
-- Notifications: `IMMEDIATE_NOTIFICATION_MIN_SCORE`, `IMMEDIATE_NOTIFICATION_MAX_SOURCE_AGE_DAYS`, `IMMEDIATE_NOTIFICATION_MAX_PER_RUN`, `DAILY_SUMMARY_MAX_MATCHES`.
+- Notifications: `IMMEDIATE_NOTIFICATION_MIN_SCORE`, `IMMEDIATE_NOTIFICATION_MAX_PER_RUN`, `DAILY_SUMMARY_MAX_MATCHES`.
 - LLM enrichment: `LLM_ENABLED`, `OPENAI_MODEL`; keep the key in the `OPENAI_API_KEY` secret.
 
 If you change the time or time zone, also update the `schedule` block in `.github/workflows/monitor.yml`. Otherwise, a scheduled trigger may fall outside the configured monitoring window and exit without running.
@@ -123,13 +123,13 @@ Open **Actions → Job Radar TW → Run workflow**. Leave `backfill` off for the
 
 The first complete scan for each company establishes its baseline. Jobs that already exist are stored and included in the Daily Summary, but they do not generate individual alerts. The baseline state is stored in Supabase and is marked complete only after a full successful scan. If that first scan is interrupted, its retry remains a baseline run instead of treating the same jobs as newly found.
 
-Later runs send individual alerts for newly found jobs that pass the strong-match and freshness rules. They also send one Daily Summary for every completed run.
+Later runs send individual alerts for newly found jobs that pass the strong-match rules. They also send one Daily Summary for every completed run.
 
-To notify yourself about existing baseline jobs, start a manual run with `backfill` checked. Backfill queues every job that currently passes profile eligibility and its score threshold and has not already been notified. It does not require the job to be new, a strong match, or within the normal freshness window. Notification deduplication and `IMMEDIATE_NOTIFICATION_MAX_PER_RUN` still apply.
+To notify yourself about existing baseline jobs, start a manual run with `backfill` checked. Posting age is never a cutoff. Notification deduplication, existing matching gates and `IMMEDIATE_NOTIFICATION_MAX_PER_RUN` still apply. The one-time automatic reconsideration of previously age-suppressed jobs is described in [candidate eligibility](docs/candidate-eligibility.md#posting-age-and-one-time-reconsideration).
 
 Anything above the per-run limit stays in `notification_outbox` and is picked up automatically by later runs. You can start another manual run to drain the queue sooner; leave `run_key` blank to generate a new one. Backfill only uses jobs the monitor can currently fetch—it cannot recover old listings that have already been removed from the source site.
 
-The default schedule begins around 20:00 America/New_York and includes several backup triggers. A daily `run_key` skips a run that already succeeded or is still active, while a later trigger can retry a failed or stale run. GitHub schedules may be delayed, so this project is not suitable for time-critical alerts.
+The default scan starts at 07:30 America/New_York, targeting completion before 09:00. The existing sequential job waits until 09:00 to deliver alerts and the Daily Summary; late scans deliver immediately. Retries at 08:30 and 09:30 use the same daily key. DST follows America/New_York. A daily `run_key` skips a run that already succeeded or is still active, while a later trigger can retry a failed or stale run. GitHub schedules may be delayed, so this project is not suitable for time-critical alerts.
 
 ## How delivery works
 
@@ -207,7 +207,7 @@ Check the secret names exactly, make sure you sent `/start` to the bot, and conf
 
 **`matches > 0` but `notifications = 0`**
 
-This is expected during baseline, when all jobs are old, or when new jobs do not pass the strong-match or freshness rules for immediate alerts. Matching jobs still appear in the Daily Summary. Use a manual backfill if you want individual alerts for baseline jobs.
+This is expected during baseline, when new jobs do not pass the strong-match rules for immediate alerts. Matching jobs still appear in the Daily Summary. Use a manual backfill if you want individual alerts for baseline jobs.
 
 **`skipped_reason: duplicate_run_key`**
 

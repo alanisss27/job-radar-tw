@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     resume_text: SecretStr | None = None
     visa_sponsorship_required: bool = False
     immediate_notification_min_score: float = Field(default=0.82, ge=0, le=1)
+    # Legacy value used only to identify previously age-suppressed backfill jobs.
     immediate_notification_max_source_age_days: int = Field(default=21, ge=0)
     immediate_notification_max_per_run: int = Field(default=5, ge=0)
     daily_summary_max_matches: int = Field(default=15, ge=1)
@@ -35,8 +36,8 @@ class Settings(BaseSettings):
     candidate_config: Path = Path("config/candidate.yml")
     source_candidates_config: Path = Path("config/source_candidates.yml")
     monitor_timezone: str = "America/New_York"
-    monitor_hour: int = Field(default=20, ge=0, le=23)
-    schedule_grace_hours: int = Field(default=16, ge=1, le=24)
+    monitor_hour: int = Field(default=7, ge=0, le=23)
+    schedule_grace_hours: int = Field(default=4, ge=1, le=24)
     request_timeout_seconds: float = 20
     max_concurrency: int = 5
 
