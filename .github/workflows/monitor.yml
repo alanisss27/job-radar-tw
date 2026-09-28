@@ -36,6 +36,11 @@ on:
         required: false
         default: "manual-36363009458-1"
         type: string
+      clinical_title_backfill_report:
+        description: "Report recovered candidates from a completed backfill (read-only)"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -96,7 +101,7 @@ jobs:
           timeout --signal=INT --kill-after=30s 110m uv run monitor run --scheduled
 
       - name: Run manual monitor
-        if: github.event_name == 'workflow_dispatch' && inputs.clinical_title_backfill != true
+        if: github.event_name == 'workflow_dispatch' && inputs.clinical_title_backfill != true && inputs.clinical_title_backfill_report != true
         shell: bash
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
@@ -143,7 +148,7 @@ jobs:
           timeout --signal=INT --kill-after=30s 45m uv run monitor run "${args[@]}"
 
       - name: Run one-time clinical title backfill
-        if: github.event_name == 'workflow_dispatch' && inputs.clinical_title_backfill == true
+        if: github.event_name == 'workflow_dispatch' && inputs.clinical_title_backfill == true && inputs.clinical_title_backfill_report != true
         shell: bash
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
@@ -165,8 +170,16 @@ jobs:
           fi
           uv run monitor clinical-title-backfill --target-run-key "$INPUT_BACKFILL_RUN_KEY"
 
+      - name: Report completed clinical title backfill
+        if: github.event_name == 'workflow_dispatch' && inputs.clinical_title_backfill_report == true
+        shell: bash
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          INPUT_BACKFILL_RUN_KEY: ${{ inputs.clinical_title_backfill_run_key }}
+        run: uv run monitor clinical-title-backfill-report --target-run-key "$INPUT_BACKFILL_RUN_KEY"
+
       - name: Notify Telegram on workflow failure
-        if: failure() && inputs.suppress_notifications != true
+        if: failure() && inputs.suppress_notifications != true && inputs.clinical_title_backfill_report != true
         shell: bash
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}

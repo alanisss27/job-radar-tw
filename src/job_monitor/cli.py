@@ -161,6 +161,20 @@ def clinical_title_backfill_command(
     typer.echo(json.dumps(report, ensure_ascii=False, indent=2))
 
 
+@app.command("clinical-title-backfill-report")
+def clinical_title_backfill_report_command(
+    target_run_key: str = typer.Option(..., help="Source run key used by the completed backfill"),
+) -> None:
+    """Read completed backfill records only; never fetch sources or send notifications."""
+    settings = Settings()
+    if not settings.database_url:
+        raise typer.BadParameter("DATABASE_URL is required")
+    report = Storage(settings.database_url, create_schema=False).clinical_backfill_report(
+        target_run_key
+    )
+    typer.echo(json.dumps(report, ensure_ascii=False, indent=2))
+
+
 @app.command("dry-run")
 def dry_run_command(
     company: str | None = typer.Option(None, help="Run only one company slug"),

@@ -621,6 +621,100 @@ class Storage:
             ).all()
         return {slug: company_id for company_id, slug in rows}
 
+    def clinical_backfill_report(self, target_run_key: str) -> dict[str, Any]:
+        """Read recovered matches and their durable application/notification state."""
+        marker_key = f"clinical-title-backfill-v57547c6-{target_run_key}"
+        with self.engine.connect() as conn:
+            marker = conn.execute(
+                select(source_runs).where(source_runs.c.run_key == marker_key)
+            ).mappings().one_or_none()
+            if marker is None:
+                raise ValueError(f"No clinical title backfill marker for {target_run_key}")
+            if marker["status"] != "success":
+                raise ValueError(f"Clinical title backfill is not complete: {marker['status']}")
+            rows = conn.execute(
+                select(
+                    companies.c.name.label("company"),
+                    jobs.c.id.label("job_id"),
+                    jobs.c.title,
+                    jobs.c.location_raw,
+                    jobs.c.canonical_url,
+                    jobs.c.content_hash,
+                    match_results.c.score,
+                    match_results.c.tier,
+                    match_results.c.details,
+                    applications.c.stage,
+                    applications.c.first_applied_at,
+                    notifications.c.id.label("notification_id"),
+                    notification_outbox.c.message,
+                )
+                .join(jobs, jobs.c.company_id == companies.c.id)
+                .join(match_results, match_results.c.job_id == jobs.c.id)
+                .outerjoin(applications, applications.c.job_id == jobs.c.id)
+                .outerjoin(
+                    notifications,
+                    and_(notifications.c.job_id == jobs.c.id,
+                         notifications.c.profile == match_results.c.profile,
+                         notifications.c.channel == "telegram",
+                         notifications.c.version_hash == match_results.c.content_hash),
+                )
+                .outerjoin(
+                    notification_outbox,
+                    and_(notification_outbox.c.job_id == jobs.c.id,
+                         notification_outbox.c.profile == match_results.c.profile,
+                         notification_outbox.c.channel == "telegram",
+                         notification_outbox.c.version_hash == match_results.c.content_hash),
+                )
+                .where(
+                    match_results.c.profile == "clinical-discovery",
+                    match_results.c.content_hash == jobs.c.content_hash,
+                    match_results.c.eligible.is_(True),
+                    match_results.c.created_at >= marker["started_at"],
+                    match_results.c.created_at <= marker["finished_at"],
+                )
+                .order_by(companies.c.name, jobs.c.title)
+            ).mappings().all()
+        candidates = []
+        for row in rows:
+            details = row["details"] or {}
+            eligibility_reasons = details.get("eligibility_reasons", [])
+            candidate_eligibility = details.get("candidate_eligibility") or {}
+            if (
+                eligibility_reasons
+                or candidate_eligibility.get("status", "eligible") != "eligible"
+                or candidate_eligibility.get("hard_reasons")
+                or candidate_eligibility.get("review_reasons")
+            ):
+                continue
+            location = row["location_raw"] or "Not stated"
+            if "remote" in location.casefold():
+                remote_status = "remote"
+            else:
+                remote_status = "not stated as remote"
+            message = row["message"] or ""
+            if "Active status not confirmed" in message:
+                active_status = "unknown"
+            elif message:
+                active_status = "active"
+            else:
+                active_status = "unknown"
+            candidates.append({
+                "company": row["company"],
+                "title": row["title"],
+                "location": location,
+                "remote_status": remote_status,
+                "active_status": active_status,
+                "official_url": row["canonical_url"],
+                "score": row["score"],
+                "disposition": f"{row['tier']} / {details.get('bucket', 'target')}",
+                "applied": row["first_applied_at"] is not None
+                           or row["stage"] in {"applied", "interview", "offer"},
+                "notified": row["notification_id"] is not None,
+                "previously_matched": False,
+                "currently_matched": True,
+            })
+        return {"target_run_key": target_run_key, "candidates": candidates}
+
     def age_suppressed_job_ids(self, company_id: str, legacy_days: int, min_score: float) -> set[str]:
         """Infer legacy alert suppression; never use this age test for eligibility.
 

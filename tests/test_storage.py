@@ -170,6 +170,44 @@ def test_clinical_title_backfill_inventory_is_limited_to_target_run_and_open_job
     assert inventory[0]["previously_notified"] is False
 
 
+def test_clinical_backfill_report_reads_only_recorded_recovered_matches(tmp_path):
+    db = Storage(f"sqlite:///{tmp_path / 'backfill-report.db'}", create_schema=True)
+    clinical = company().model_copy(update={"profiles": ["clinical-discovery"]})
+    company_id = db.sync_company(clinical)
+    marker_key = "clinical-title-backfill-v57547c6-manual-36363009458-1"
+    marker_id = db.start_run(marker_key)
+    source_id = db.start_run("source-run")
+    posting = raw_job("recovered")
+    plan = db.plan_job(company_id, posting)
+    db.persist_job_decisions(company_id, source_id, posting, plan, [])
+    db.record_match(
+        plan.job_id,
+        "1.4",
+        posting.content_hash,
+        MatchResult(
+            profile="clinical-discovery", score=0.86, eligible=True,
+            tier="strong", bucket="target",
+        ),
+    )
+    db.finish_run(marker_id, {"newly_recovered_matches": 1}, [])
+
+    report = db.clinical_backfill_report("manual-36363009458-1")
+    assert report["candidates"] == [{
+        "company": "Acme",
+        "title": "Data Analyst recovered",
+        "location": "Phoenix, AZ",
+        "remote_status": "not stated as remote",
+        "active_status": "unknown",
+        "official_url": "https://example.com/jobs/recovered",
+        "score": 0.86,
+        "disposition": "strong / target",
+        "applied": False,
+        "notified": False,
+        "previously_matched": False,
+        "currently_matched": True,
+    }]
+
+
 def test_stale_running_run_can_be_reclaimed(tmp_path):
     db = Storage(f"sqlite:///{tmp_path / 'test.db'}", create_schema=True)
     run_id = db.start_run("same")
