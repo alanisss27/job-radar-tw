@@ -1,5 +1,5 @@
 import pytest
-from sqlalchemy import event, func, select
+from sqlalchemy import event, func, select, update
 
 from job_monitor.models import CompanyConfig, MatchResult, RawJob
 from job_monitor.storage import (
@@ -142,6 +142,32 @@ def test_fresh_running_run_key_is_rejected(tmp_path):
     db = Storage(f"sqlite:///{tmp_path / 'test.db'}", create_schema=True)
     assert db.start_run("same")
     assert db.start_run("same") is None
+
+
+def test_clinical_title_backfill_inventory_is_limited_to_target_run_and_open_jobs(tmp_path):
+    db = Storage(f"sqlite:///{tmp_path / 'backfill.db'}", create_schema=True)
+    clinical = company().model_copy(update={"profiles": ["clinical-discovery"]})
+    clinical_id = db.sync_company(clinical)
+    run_id = db.start_run("manual-36363009458-1")
+    posting = raw_job("open")
+    open_plan = db.plan_job(clinical_id, posting)
+    db.persist_job_decisions(clinical_id, run_id, posting, open_plan, [])
+    prior = MatchResult(
+        profile="clinical-discovery", score=0.2, eligible=False, tier="reject"
+    )
+    db.record_match(open_plan.job_id, "1.3", posting.content_hash, prior)
+    closed = raw_job("closed")
+    closed_plan = db.plan_job(clinical_id, closed)
+    db.persist_job_decisions(clinical_id, run_id, closed, closed_plan, [])
+    assert db.finish_run(run_id, {}, [])
+
+    with db.engine.begin() as conn:
+        conn.execute(update(jobs).where(jobs.c.id == closed_plan.job_id).values(status="closed"))
+
+    inventory = db.clinical_backfill_inventory(run_id, {clinical_id}, "clinical-discovery")
+    assert [item["payload"]["external_job_id"] for item in inventory] == ["open"]
+    assert inventory[0]["previously_matched"] is False
+    assert inventory[0]["previously_notified"] is False
 
 
 def test_stale_running_run_can_be_reclaimed(tmp_path):

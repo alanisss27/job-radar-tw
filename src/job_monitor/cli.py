@@ -25,7 +25,7 @@ from .onboarding import (
     render_verifications,
     verify_companies,
 )
-from .pipeline import RunReport, run_pipeline
+from .pipeline import RunReport, run_clinical_title_backfill, run_pipeline
 from .resume import load_resume
 from .schedule import scheduled_run_key
 from .storage import Storage
@@ -144,6 +144,21 @@ def run_command(
         raise typer.Exit(code=1)
     if not report.sources_succeeded and report.sources_attempted:
         raise typer.Exit(code=1)
+
+
+@app.command("clinical-title-backfill")
+def clinical_title_backfill_command(
+    target_run_key: str = typer.Option(..., help="Successful inventory run key to re-evaluate"),
+) -> None:
+    """Re-evaluate only stored clinical-discovery inventory from one completed run."""
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    settings, companies, profiles, preferences, candidate = _load()
+    report = asyncio.run(
+        run_clinical_title_backfill(
+            settings, companies, profiles, preferences, candidate, target_run_key
+        )
+    )
+    typer.echo(json.dumps(report, ensure_ascii=False, indent=2))
 
 
 @app.command("dry-run")

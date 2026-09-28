@@ -555,6 +555,72 @@ class Storage:
             )
             return finished.rowcount == 1
 
+    def completed_run_id(self, run_key: str) -> str | None:
+        """Return a successful source run ID for a stored-inventory migration."""
+        with self.engine.connect() as conn:
+            row = conn.execute(
+                select(source_runs.c.id).where(
+                    source_runs.c.run_key == run_key,
+                    source_runs.c.status == "success",
+                )
+            ).scalar_one_or_none()
+        return row
+
+    def clinical_backfill_inventory(
+        self, run_id: str, company_ids: set[str], profile: str
+    ) -> list[dict[str, Any]]:
+        """Current, open payloads seen in one completed run, plus prior-match state."""
+        if not company_ids:
+            return []
+        with self.engine.connect() as conn:
+            rows = conn.execute(
+                select(jobs, job_versions.c.payload)
+                .join(job_versions, and_(
+                    job_versions.c.job_id == jobs.c.id,
+                    job_versions.c.content_hash == jobs.c.content_hash,
+                ))
+                .where(
+                    jobs.c.company_id.in_(company_ids),
+                    jobs.c.last_seen_run_id == run_id,
+                    jobs.c.status == "active",
+                )
+            ).mappings().all()
+            output = []
+            for row in rows:
+                prior_match = conn.execute(
+                    select(match_results.c.id).where(
+                        match_results.c.job_id == row["id"],
+                        match_results.c.profile == profile,
+                        match_results.c.content_hash == row["content_hash"],
+                        match_results.c.eligible.is_(True),
+                    ).limit(1)
+                ).scalar_one_or_none()
+                prior_notification = conn.execute(
+                    select(notifications.c.id).where(
+                        notifications.c.job_id == row["id"],
+                        notifications.c.profile == profile,
+                        notifications.c.channel == "telegram",
+                    ).limit(1)
+                ).scalar_one_or_none()
+                output.append({
+                    "job_id": row["id"],
+                    "company_id": row["company_id"],
+                    "content_hash": row["content_hash"],
+                    "payload": row["payload"],
+                    "previously_matched": prior_match is not None,
+                    "previously_notified": prior_notification is not None,
+                })
+        return output
+
+    def company_ids_for_slugs(self, slugs: set[str]) -> dict[str, str]:
+        if not slugs:
+            return {}
+        with self.engine.connect() as conn:
+            rows = conn.execute(
+                select(companies.c.id, companies.c.slug).where(companies.c.slug.in_(slugs))
+            ).all()
+        return {slug: company_id for company_id, slug in rows}
+
     def age_suppressed_job_ids(self, company_id: str, legacy_days: int, min_score: float) -> set[str]:
         """Infer legacy alert suppression; never use this age test for eligibility.
 

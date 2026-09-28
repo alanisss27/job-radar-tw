@@ -212,6 +212,108 @@ def _safe_error(exc: BaseException, settings: Settings) -> str:
     return message[:500]
 
 
+async def run_clinical_title_backfill(
+    settings: Settings,
+    companies: list[CompanyConfig],
+    profiles: dict[str, ProfileConfig],
+    preferences: SearchPreferences,
+    candidate: CandidateProfile | None,
+    target_run_key: str,
+) -> dict[str, int | str]:
+    """Re-evaluate stored current inventory once, without fetching any sources."""
+    if not settings.database_url:
+        raise ValueError("DATABASE_URL is required")
+    profile_name = "clinical-discovery"
+    if profile_name not in profiles:
+        raise ValueError("clinical-discovery profile is not configured")
+    storage = Storage(settings.database_url, create_schema=False)
+    source_run_id = storage.completed_run_id(target_run_key)
+    if source_run_id is None:
+        raise ValueError(f"No successful stored source run found: {target_run_key}")
+    marker_key = f"clinical-title-backfill-v57547c6-{target_run_key}"
+    claim = storage.claim_run(marker_key)
+    if claim is None:
+        return {"status": "already_completed_or_running", "jobs_re_evaluated": 0,
+                "newly_recovered_matches": 0, "actionable_candidates": 0,
+                "active": 0, "inactive": 0, "unknown": 0}
+
+    counters = {"jobs_re_evaluated": 0, "newly_recovered_matches": 0,
+                "actionable_candidates": 0, "active": 0, "inactive": 0, "unknown": 0}
+    recovered_titles: list[str] = []
+    errors: list[dict[str, str]] = []
+    try:
+        company_by_id: dict[str, CompanyConfig] = {}
+        selected_companies = [company for company in companies if profile_name in company.profiles]
+        company_ids = storage.company_ids_for_slugs({company.slug for company in selected_companies})
+        company_by_id = {
+            company_id: company
+            for company in selected_companies
+            if (company_id := company_ids.get(company.slug)) is not None
+        }
+        inventory = storage.clinical_backfill_inventory(
+            source_run_id, set(company_by_id), profile_name
+        )
+        resume = load_resume(
+            settings.resume_path,
+            settings.resume_text.get_secret_value() if settings.resume_text else None,
+        )
+        timeout = httpx.Timeout(settings.request_timeout_seconds)
+        async with httpx.AsyncClient(
+            timeout=timeout, follow_redirects=True,
+            headers={"User-Agent": "JobRadarTW/0.1"},
+        ) as client:
+            active_status_cache: dict[str, ActiveStatus] = {}
+            for row in inventory:
+                counters["jobs_re_evaluated"] += 1
+                raw = RawJob.model_validate(row["payload"])
+                company = company_by_id[row["company_id"]]
+                parsed = parse_job(raw)
+                result = match_job(
+                    parsed, profiles[profile_name], preferences, resume,
+                    visa_sponsorship_required=settings.visa_sponsorship_required,
+                    company_visa_support=company.visa_support,
+                    candidate=candidate, company_ndx_member=company.ndx_member,
+                )
+                storage.record_match(
+                    row["job_id"], profiles[profile_name].version,
+                    row["content_hash"], result,
+                )
+                if (
+                    not result.notification_eligible
+                    or row["previously_matched"]
+                    or row["previously_notified"]
+                ):
+                    continue
+                counters["newly_recovered_matches"] += 1
+                recovered_titles.append(raw.title)
+                if not _qualifies_for_immediate_notification(
+                    parsed, result, datetime.now(UTC), settings, is_new=True
+                ):
+                    continue
+                status = await verify_if_actionable(True, raw, client, active_status_cache)
+                counters[status.value] += 1
+                if not notification_status_allows(status):
+                    continue
+                message = render_job_message(
+                    company.name, parsed, result, datetime.now(UTC),
+                    display_timezone=settings.monitor_timezone,
+                )
+                label = manual_verification_label(status)
+                if label:
+                    message += "\n\n" + label
+                if storage.queue_notification(
+                    row["job_id"], profile_name, row["content_hash"],
+                    result.score, message,
+                ):
+                    counters["actionable_candidates"] += 1
+        storage.finish_run(claim.run_id, counters, errors)
+        return {"status": "completed", **counters, "recovered_titles": recovered_titles}
+    except BaseException as exc:
+        errors.append({"company": "clinical-title-backfill", "error": _safe_error(exc, settings)})
+        storage.finish_run(claim.run_id, counters, errors)
+        raise
+
+
 async def run_pipeline(
     settings: Settings,
     companies: list[CompanyConfig],

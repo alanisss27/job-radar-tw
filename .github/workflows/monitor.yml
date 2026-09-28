@@ -26,6 +26,16 @@ on:
         required: false
         default: false
         type: boolean
+      clinical_title_backfill:
+        description: "Run the one-time clinical title backfill against stored inventory"
+        required: false
+        default: false
+        type: boolean
+      clinical_title_backfill_run_key:
+        description: "Successful stored source run key to re-evaluate"
+        required: false
+        default: "manual-36363009458-1"
+        type: string
 
 permissions:
   contents: read
@@ -86,7 +96,7 @@ jobs:
           timeout --signal=INT --kill-after=30s 110m uv run monitor run --scheduled
 
       - name: Run manual monitor
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' && inputs.clinical_title_backfill != true
         shell: bash
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
@@ -131,6 +141,29 @@ jobs:
             args+=(--suppress-notifications)
           fi
           timeout --signal=INT --kill-after=30s 45m uv run monitor run "${args[@]}"
+
+      - name: Run one-time clinical title backfill
+        if: github.event_name == 'workflow_dispatch' && inputs.clinical_title_backfill == true
+        shell: bash
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          RESUME_TEXT: ${{ secrets.RESUME_TEXT }}
+          OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
+          LLM_ENABLED: ${{ vars.LLM_ENABLED || 'false' }}
+          VISA_SPONSORSHIP_REQUIRED: ${{ vars.VISA_SPONSORSHIP_REQUIRED || 'false' }}
+          MONITOR_TIMEZONE: America/New_York
+          INPUT_BACKFILL_RUN_KEY: ${{ inputs.clinical_title_backfill_run_key }}
+        run: |
+          if [[ -n "${RESUME_TEXT:-}" ]]; then
+            resume_file="${RUNNER_TEMP}/resume.md"
+            printf '%s' "$RESUME_TEXT" > "$resume_file"
+            export RESUME_PATH="$resume_file"
+            unset RESUME_TEXT
+          fi
+          uv run monitor clinical-title-backfill --target-run-key "$INPUT_BACKFILL_RUN_KEY"
 
       - name: Notify Telegram on workflow failure
         if: failure() && inputs.suppress_notifications != true
