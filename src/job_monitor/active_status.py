@@ -6,6 +6,7 @@ import re
 from enum import StrEnum
 from html import unescape
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 from bs4 import BeautifulSoup
@@ -37,8 +38,6 @@ _ACCEPTING = re.compile(
 def structured_status(metadata: dict[str, Any]) -> ActiveStatus:
     """Read only explicit applyability fields; page URLs and posting text do not count."""
     recorded = metadata.get("active_status")
-    if isinstance(recorded, str) and recorded in ActiveStatus._value2member_map_:
-        return ActiveStatus(recorded)
     values: list[tuple[str, Any]] = []
 
     def visit(value: Any) -> None:
@@ -57,6 +56,30 @@ def structured_status(metadata: dict[str, Any]) -> ActiveStatus:
     visit(metadata)
     if any(key in {"posted", "canapply"} and value is False for key, value in values):
         return ActiveStatus.INACTIVE
+
+    workday_evidence = metadata.get("active_status_evidence")
+    workday_evidence = workday_evidence if isinstance(workday_evidence, dict) else {}
+    has_workday_status = isinstance(metadata.get("workday"), dict) or any(
+        key.casefold().replace("_", "") in {"posted", "canapply"}
+        for key in workday_evidence
+    )
+    if has_workday_status:
+        can_apply = next(
+            (value for key, value in values if key == "canapply"), None
+        )
+        apply_url = workday_evidence.get("apply_url") or workday_evidence.get("applyUrl")
+        if isinstance(apply_url, str):
+            parsed_apply_url = urlsplit(apply_url.strip())
+            usable_apply_url = (
+                parsed_apply_url.scheme in {"http", "https"} and bool(parsed_apply_url.netloc)
+            ) or (parsed_apply_url.path.startswith("/") and not parsed_apply_url.netloc)
+        else:
+            usable_apply_url = False
+        if can_apply is True and usable_apply_url:
+            return ActiveStatus.ACTIVE
+        return ActiveStatus.UNKNOWN
+    if isinstance(recorded, str) and recorded in ActiveStatus._value2member_map_:
+        return ActiveStatus(recorded)
     if any(key == "canapply" and value is True for key, value in values):
         return ActiveStatus.ACTIVE
     if any(key == "applyurl" and value.strip().startswith(("https://", "http://", "/"))

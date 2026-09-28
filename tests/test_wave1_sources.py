@@ -12,6 +12,7 @@ import httpx
 import pytest
 import respx
 
+from job_monitor.active_status import ActiveStatus, structured_status
 from job_monitor.config import (
     CandidateEligibilityConfig,
     SearchPreferences,
@@ -104,6 +105,9 @@ async def test_smpa_pagination_details_remote_identity_and_discovery():
                 "jobDescription": "<p>" + BODY + "</p>",
                 "canApply": True,
                 "posted": True,
+                "positionUserActions": {
+                    "applyAction": {"applyUrl": "https://apply.sumitomopharma.test/R01505"}
+                },
             }
         },
     )
@@ -118,6 +122,7 @@ async def test_smpa_pagination_details_remote_identity_and_discovery():
     assert raw.location_raw == "US-Remote; United States of America; US"
     assert raw.description_raw == BODY
     assert str(raw.url) == company.ats_config["detail_base_url"] + path
+    assert structured_status(raw.metadata) is ActiveStatus.ACTIVE
     assert match_job(parse_job(raw), PROFILE, FLORIDA).discovery_eligible
     assert assess_candidate(raw, FLORIDA).work_arrangement.value == "remote"
     assert_repeat_is_unchanged(raw)

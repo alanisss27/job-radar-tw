@@ -33,9 +33,35 @@ def test_workday_can_apply_false_is_inactive():
 
 
 @pytest.mark.parametrize(
+    ("evidence", "expected"),
+    [
+        (
+            {"posted": True, "canApply": True, "apply_url": "https://apply.example.test/123"},
+            ActiveStatus.ACTIVE,
+        ),
+        ({"posted": True, "canApply": True, "apply_url": None}, ActiveStatus.UNKNOWN),
+        ({"posted": True, "canApply": True}, ActiveStatus.UNKNOWN),
+        ({"active_status": "active", "posted": True, "canApply": True}, ActiveStatus.UNKNOWN),
+        ({"posted": True, "canApply": False}, ActiveStatus.INACTIVE),
+        ({"active_status": "active", "posted": False}, ActiveStatus.INACTIVE),
+        (
+            {"posted": False, "canApply": True, "apply_url": "https://apply.example.test/123"},
+            ActiveStatus.INACTIVE,
+        ),
+        ({"posted": True}, ActiveStatus.UNKNOWN),
+    ],
+)
+def test_workday_status_requires_current_apply_evidence(evidence, expected):
+    metadata = {
+        "workday": {"externalPath": "/job/123"},
+        "active_status_evidence": evidence,
+    }
+    assert structured_status(metadata) is expected
+
+
+@pytest.mark.parametrize(
     "evidence",
     [
-        {"active_status_evidence": {"canApply": True}},
         {"eightfold": {"application_url": "https://apply.example.test/123"}},
         {"active_status_evidence": {"apply_url": "/apply/123"}},
     ],
@@ -64,6 +90,19 @@ async def test_official_page_evidence(body, expected):
     assert job.metadata["active_status"] == expected.value
 
 
+@pytest.mark.asyncio
+async def test_workday_unknown_can_still_become_inactive_on_explicit_closure():
+    async def handler(request):
+        return httpx.Response(200, text="<p>This job posting is no longer active.</p>")
+
+    job = raw(metadata={
+        "workday": {"externalPath": "/job/123"},
+        "active_status_evidence": {"posted": True, "canApply": True},
+    })
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        assert await verify_active_status(job, client, {}) is ActiveStatus.INACTIVE
+
+
 def test_old_posting_age_is_informational_when_apply_evidence_exists():
     job = raw(
         metadata={"active_status_evidence": {"apply_url": "https://apply.example.test/123"}},
@@ -77,7 +116,12 @@ def test_old_posting_age_is_informational_when_apply_evidence_exists():
 
 
 def test_unknown_retains_candidate_with_manual_verification_label():
-    assert notification_status_allows(ActiveStatus.UNKNOWN)
+    job_status = structured_status({
+        "workday": {},
+        "active_status_evidence": {"posted": True, "canApply": True},
+    })
+    assert job_status is ActiveStatus.UNKNOWN
+    assert notification_status_allows(job_status)
     assert manual_verification_label(ActiveStatus.UNKNOWN) == (
         "Active status not confirmed — manual verification needed"
     )
