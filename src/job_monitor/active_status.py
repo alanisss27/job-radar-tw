@@ -36,6 +36,9 @@ _ACCEPTING = re.compile(
 
 def structured_status(metadata: dict[str, Any]) -> ActiveStatus:
     """Read only explicit applyability fields; page URLs and posting text do not count."""
+    recorded = metadata.get("active_status")
+    if isinstance(recorded, str) and recorded in ActiveStatus._value2member_map_:
+        return ActiveStatus(recorded)
     values: list[tuple[str, Any]] = []
 
     def visit(value: Any) -> None:
@@ -62,7 +65,7 @@ def structured_status(metadata: dict[str, Any]) -> ActiveStatus:
     return ActiveStatus.UNKNOWN
 
 
-def _page_status(content: str) -> ActiveStatus:
+def page_status(content: str) -> ActiveStatus:
     soup = BeautifulSoup(content, "html.parser")
     text = unescape(soup.get_text(" ", strip=True))
     if _CLOSED.search(text):
@@ -92,6 +95,9 @@ async def verify_active_status(
     if status is not ActiveStatus.UNKNOWN:
         raw.metadata["active_status"] = status.value
         return status
+    if raw.metadata.get("active_status_page_checked") is True:
+        raw.metadata["active_status"] = ActiveStatus.UNKNOWN.value
+        return ActiveStatus.UNKNOWN
     url = raw.canonical_url
     if url not in cache:
         try:
@@ -99,7 +105,7 @@ async def verify_active_status(
             if response.status_code in {404, 410}:
                 cache[url] = ActiveStatus.INACTIVE
             elif response.is_success:
-                cache[url] = _page_status(response.text)
+                cache[url] = page_status(response.text)
             else:
                 cache[url] = ActiveStatus.UNKNOWN
         except (httpx.HTTPError, ValueError):

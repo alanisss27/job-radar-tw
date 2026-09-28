@@ -22,6 +22,7 @@ class AtsType(StrEnum):
     JIBE = "jibe"
     JSONLD = "jsonld"
     EIGHTFOLD = "eightfold"
+    SUCCESSFACTORS = "successfactors"
 
 
 class ProfileName(StrEnum):
@@ -130,6 +131,7 @@ class CompanyConfig(BaseModel):
                 "domain",
                 "public_job_url_template",
             },
+            AtsType.SUCCESSFACTORS: {"search_endpoint"},
         }[self.ats_type]
         missing = required - set(self.ats_config)
         if missing:

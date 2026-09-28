@@ -11,7 +11,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
-from urllib.parse import urljoin
+from urllib.parse import parse_qsl, urljoin, urlsplit
 
 import httpx
 from bs4 import BeautifulSoup
@@ -20,6 +20,7 @@ from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_ex
 
 from .models import AtsType, CompanyConfig, RawJob
 from .eligibility import credential_clauses
+from .active_status import ActiveStatus, page_status
 
 logger = logging.getLogger(__name__)
 
@@ -1073,6 +1074,176 @@ class EightfoldSource(JobSource):
         return jobs
 
 
+class SuccessFactorsSource(JobSource):
+    """Public SAP SuccessFactors career pages with HTML search and detail pages."""
+
+    _job_path = re.compile(r"/job/[^/?#]+/(\d+)(?:/|$)", re.I)
+    _date_formats = ("%b %d, %Y", "%B %d, %Y", "%m/%d/%y", "%m/%d/%Y")
+
+    @staticmethod
+    def _posted_date(value: str) -> datetime | None:
+        value = value.strip()
+        for date_format in SuccessFactorsSource._date_formats:
+            try:
+                return datetime.strptime(value, date_format).replace(tzinfo=UTC)
+            except ValueError:
+                continue
+        return None
+
+    @classmethod
+    def _listing_items(cls, content: str, base_url: str) -> list[dict[str, Any]]:
+        soup = BeautifulSoup(content, "html.parser")
+        found: dict[str, dict[str, Any]] = {}
+        for anchor in soup.select("a[href]"):
+            href = urljoin(base_url, anchor.get("href", ""))
+            path = urlsplit(href).path
+            match = cls._job_path.search(path)
+            title = anchor.get_text(" ", strip=True)
+            if not match or not title:
+                continue
+            job_id = match.group(1)
+            row = anchor.find_parent("tr") or anchor.find_parent("li") or anchor.parent
+            row_text = row.get_text(" | ", strip=True) if row else title
+            cells = [cell.get_text(" ", strip=True) for cell in row.select("td, th")] if row else []
+            if cells:
+                # Career-site result tables expose Title, Location, and Date columns.
+                title_index = next((i for i, cell in enumerate(cells) if title in cell), 0)
+                remainder = [cell for i, cell in enumerate(cells) if i != title_index and cell]
+                location = remainder[0] if remainder else ""
+                date_text = next((cell for cell in remainder if cls._posted_date(cell)), "")
+                if date_text == location and len(remainder) > 1:
+                    location = remainder[1]
+            else:
+                without_title = row_text.replace(title, "", 1).strip(" |")
+                date_match = re.search(r"\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2},\s+\d{4}\b|\b\d{1,2}/\d{1,2}/\d{2,4}\b", without_title, re.I)
+                date_text = date_match.group(0) if date_match else ""
+                location = without_title.replace(date_text, "", 1).strip(" |")
+            found.setdefault(job_id, {
+                "id": job_id,
+                "title": title,
+                "location": location,
+                "posted_at": cls._posted_date(date_text),
+                "url": href,
+            })
+        return list(found.values())
+
+    @staticmethod
+    def _next_startrow(content: str, base_url: str, current: int) -> int | None:
+        offsets = []
+        for anchor in BeautifulSoup(content, "html.parser").select("a[href]"):
+            query = dict(parse_qsl(urlsplit(urljoin(base_url, anchor["href"])).query))
+            try:
+                offset = int(query.get("startrow", "0"))
+            except ValueError:
+                continue
+            if offset > current:
+                offsets.append(offset)
+        return min(offsets) if offsets else None
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=8),
+        retry=retry_if_exception_type((httpx.HTTPError, SourceError)),
+        reraise=True,
+    )
+    async def _get_html(self, url: str, **kwargs: Any) -> str:
+        response = await self.client.get(url, timeout=20, follow_redirects=True, **kwargs)
+        response.raise_for_status()
+        return response.text
+
+    async def fetch(self) -> list[RawJob]:
+        endpoint = str(self.company.ats_config["search_endpoint"])
+        page_size = int(self.company.ats_config.get("page_size", 25))
+        base_query = dict(parse_qsl(urlsplit(endpoint).query))
+        listing_base = urlsplit(endpoint)._replace(query="").geturl()
+        listings: dict[str, dict[str, Any]] = {}
+        startrow = 0
+        while True:
+            page_url = listing_base
+            page = await self._get_html(
+                page_url,
+                params={**base_query, "startrow": startrow},
+            )
+            page_items = self._listing_items(page, listing_base)
+            if not page_items:
+                if startrow == 0:
+                    logger.info("SuccessFactors returned no listings for %s", self.company.slug)
+                break
+            new_ids = 0
+            for item in page_items:
+                if item["id"] not in listings:
+                    listings[item["id"]] = item
+                    new_ids += 1
+            if not new_ids:
+                break
+            next_startrow = self._next_startrow(page, listing_base, startrow)
+            if next_startrow is not None:
+                startrow = next_startrow
+            elif len(page_items) >= page_size:
+                startrow += page_size
+            else:
+                break
+
+        jobs: list[RawJob] = []
+        for item in listings.values():
+            try:
+                detail_html = await self._get_html(item["url"])
+            except (httpx.HTTPError, SourceError) as exc:
+                logger.warning(
+                    "Skipping unavailable SuccessFactors detail for %s job %s: %s",
+                    self.company.slug, item["id"], exc,
+                )
+                continue
+            soup = BeautifulSoup(detail_html, "html.parser")
+            title_node = soup.select_one("h1")
+            title = title_node.get_text(" ", strip=True) if title_node else item["title"]
+            description_node = soup.select_one(
+                "#jobDescription, .jobDescription, .job-description, [class*='jobDescription']"
+            ) or soup.select_one("main")
+            if description_node is None:
+                description_node = soup.body or soup
+            description = description_node.get_text(" ", strip=True)
+            apply_url = None
+            for anchor in soup.select("a[href]"):
+                label = anchor.get_text(" ", strip=True).strip(" »›")
+                target = anchor.get("href", "").strip()
+                href = urljoin(item["url"], target)
+                if (
+                    re.match(r"^apply(?:\s|$)", label, re.I)
+                    and target
+                    and not target.startswith("#")
+                    and urlsplit(href).scheme in {"http", "https"}
+                ):
+                    if anchor.has_attr("disabled") or anchor.get("aria-disabled", "").casefold() == "true":
+                        continue
+                    apply_url = href
+                    break
+            status = page_status(detail_html)
+            if apply_url and status is not ActiveStatus.INACTIVE:
+                status = ActiveStatus.ACTIVE
+            metadata = {
+                "successfactors": {"requisition_id": item["id"], "apply_url": apply_url},
+                "active_status": status.value,
+                "active_status_page_checked": True,
+                "active_status_evidence": {"apply_url": apply_url} if apply_url else {},
+            }
+            _append_raw_job(
+                jobs,
+                "SuccessFactors",
+                self.company.slug,
+                item,
+                source_company=self.company.slug,
+                external_job_id=item["id"],
+                title=title or item["title"],
+                location_raw=item["location"],
+                description_raw=description,
+                posted_at=item["posted_at"],
+                url=item["url"],
+                metadata=metadata,
+            )
+        return jobs
+
+
 SOURCE_CLASSES: dict[AtsType, type[JobSource]] = {
     AtsType.GREENHOUSE: GreenhouseSource,
     AtsType.LEVER: LeverSource,
@@ -1083,6 +1254,7 @@ SOURCE_CLASSES: dict[AtsType, type[JobSource]] = {
     AtsType.JIBE: JibeSource,
     AtsType.JSONLD: JsonLdSource,
     AtsType.EIGHTFOLD: EightfoldSource,
+    AtsType.SUCCESSFACTORS: SuccessFactorsSource,
 }
 
 

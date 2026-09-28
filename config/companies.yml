@@ -1,6 +1,18 @@
 # Registry entries are intentionally explicit. `source_verified` means a live API
 # response has been checked, not merely that the company is a desired target.
 companies:
+  - slug: bausch-lomb
+    name: Bausch + Lomb
+    careers_url: https://careers.bauschlomb.com/search
+    ats_type: successfactors
+    ats_config:
+      search_endpoint: https://careers.bauschlomb.com/search
+      page_size: 25
+    industry: medtech
+    profiles: [clinical-discovery]
+    priority: 1
+    enabled: true
+    source_verified: true
   # Wave 1, verified 2026-09-24. SMPA exposes location facets, not a country facet;
   # enumerate the official board and retain full detail/location evidence.
   - slug: sumitomo-pharma-america
