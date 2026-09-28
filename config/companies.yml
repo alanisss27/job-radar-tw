@@ -1,6 +1,25 @@
 # Registry entries are intentionally explicit. `source_verified` means a live API
 # response has been checked, not merely that the company is a desired target.
 companies:
+  # Resolve LSU's hiringCompany facet by the exact Pennington unit name each run.
+  # Workday refuses the fetch if this employer facet stops resolving.
+  - slug: pennington-biomedical-research-center
+    name: Pennington Biomedical Research Center
+    careers_url: https://www.pbrc.edu/human-resources/careers/
+    ats_type: workday
+    ats_config:
+      endpoint: https://lsu.wd1.myworkdayjobs.com/wday/cxs/lsu/LSU/jobs
+      site: lsu.wd1.myworkdayjobs.com
+      detail_base_url: https://lsu.wd1.myworkdayjobs.com/en-US/LSU
+      detail_api_base: https://lsu.wd1.myworkdayjobs.com/wday/cxs/lsu/LSU
+      limit: 20
+      facet_patterns:
+        hiringCompany: '^Pennington Biomedical Research Center$'
+    industry: biomedical-research
+    profiles: [clinical-discovery]
+    priority: 1
+    enabled: true
+    source_verified: true
   - slug: bausch-lomb
     name: Bausch + Lomb
     careers_url: https://careers.bauschlomb.com/search
