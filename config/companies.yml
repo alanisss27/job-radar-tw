@@ -1,6 +1,17 @@
 # Registry entries are intentionally explicit. `source_verified` means a live API
 # response has been checked, not merely that the company is a desired target.
 companies:
+  - slug: cognitive-research-corporation
+    name: Cognitive Research Corporation (CRC)
+    careers_url: https://careers.cogres.com/jobs
+    ats_type: teamtailor
+    ats_config:
+      listing_endpoint: https://careers.cogres.com/jobs
+    industry: clinical-services
+    profiles: [clinical-discovery]
+    priority: 1
+    enabled: true
+    source_verified: true
   # Resolve LSU's hiringCompany facet by the exact Pennington unit name each run.
   # Workday refuses the fetch if this employer facet stops resolving.
   - slug: pennington-biomedical-research-center

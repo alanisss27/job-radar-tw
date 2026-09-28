@@ -1244,6 +1244,174 @@ class SuccessFactorsSource(JobSource):
         return jobs
 
 
+class TeamtailorSource(JobSource):
+    """Public Teamtailor career sites rendered as ordinary HTML pages."""
+
+    _job_path = re.compile(r"/jobs/(\d+)-([^/?#]+)(?:/|$)", re.I)
+    _apply_labels = {"apply for this job", "apply now", "apply"}
+
+    @classmethod
+    def _listing_items(cls, content: str, base_url: str) -> list[dict[str, Any]]:
+        soup = BeautifulSoup(content, "html.parser")
+        items: dict[str, dict[str, Any]] = {}
+        for anchor in soup.select("a[href]"):
+            detail_url = urljoin(base_url, anchor["href"])
+            match = cls._job_path.search(urlsplit(detail_url).path)
+            title = anchor.get_text(" ", strip=True)
+            if not match or not title:
+                continue
+            job_id = match.group(1)
+            card = anchor.find_parent("li") or anchor.parent
+            card_text = card.get_text(" ", strip=True) if card else title
+            remainder = re.sub(re.escape(title), "", card_text, count=1, flags=re.I).strip(" ·|•-\t")
+            parts = [part.strip(" ·|•\t") for part in re.split(r"\s*[·|•]\s*", remainder) if part.strip(" ·|•\t")]
+            arrangement = next(
+                (part for part in parts if re.fullmatch(r"fully remote|remote|hybrid|on[ -]?site", part, re.I)),
+                "",
+            )
+            department = parts[0] if parts else ""
+            location = parts[1] if len(parts) > 1 else ""
+            if arrangement and parts and parts[-1].casefold() == arrangement.casefold():
+                if len(parts) > 2:
+                    location = parts[-2]
+                if len(parts) > 2:
+                    department = parts[0]
+            items.setdefault(job_id, {
+                "id": job_id,
+                "title": title,
+                "url": detail_url,
+                "department": department,
+                "location": location,
+                "remote_status": arrangement,
+            })
+        return list(items.values())
+
+    @staticmethod
+    def _next_listing_url(content: str, current_url: str) -> str | None:
+        soup = BeautifulSoup(content, "html.parser")
+        for anchor in soup.select("a[rel~='next'][href], a[href]"):
+            label = anchor.get_text(" ", strip=True).casefold()
+            if "next" not in label and "next" not in anchor.get("rel", []):
+                continue
+            candidate = urljoin(current_url, anchor["href"])
+            if candidate != current_url:
+                return candidate
+        return None
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=8),
+        retry=retry_if_exception_type((httpx.HTTPError, SourceError)),
+        reraise=True,
+    )
+    async def _get_html(self, url: str) -> str:
+        response = await self.client.get(url, timeout=20, follow_redirects=True)
+        response.raise_for_status()
+        return response.text
+
+    @staticmethod
+    def _apply_evidence(content: str, detail_url: str) -> tuple[ActiveStatus, dict[str, Any]]:
+        status = page_status(content)
+        if status is ActiveStatus.INACTIVE:
+            return status, {}
+        soup = BeautifulSoup(content, "html.parser")
+        for anchor in soup.select("a[href]"):
+            label = re.sub(r"\s+", " ", anchor.get_text(" ", strip=True)).casefold()
+            target = anchor.get("href", "").strip()
+            apply_url = urljoin(detail_url, target)
+            if (
+                label in TeamtailorSource._apply_labels
+                and target
+                and not target.startswith("#")
+                and urlsplit(apply_url).scheme in {"http", "https"}
+            ):
+                return ActiveStatus.ACTIVE, {"apply_url": apply_url}
+
+        # CRC's detail page uses this exact enabled action to reveal its application form.
+        for button in soup.select("button"):
+            label = re.sub(r"\s+", " ", button.get_text(" ", strip=True)).casefold()
+            if label != "apply for this job":
+                continue
+            if button.has_attr("disabled") or button.get("aria-disabled", "").casefold() == "true":
+                return ActiveStatus.INACTIVE, {"disabled_apply_action": True}
+            has_form_affordance = bool(
+                soup.select_one("form[action], [data-action*='apply' i], [aria-controls*='application' i], [id*='application' i], [class*='application-form' i]")
+                or re.search(r"\bloading application form\b", soup.get_text(" ", strip=True), re.I)
+            )
+            if has_form_affordance:
+                return ActiveStatus.ACTIVE, {
+                    "apply_action": {"label": "Apply for this job", "form_affordance": True}
+                }
+        return status, {}
+
+    async def fetch(self) -> list[RawJob]:
+        first_page = str(self.company.ats_config["listing_endpoint"])
+        pending = [first_page]
+        visited_pages: set[str] = set()
+        listings: dict[str, dict[str, Any]] = {}
+        while pending:
+            page_url = pending.pop(0)
+            if page_url in visited_pages:
+                continue
+            visited_pages.add(page_url)
+            page = await self._get_html(page_url)
+            for item in self._listing_items(page, page_url):
+                listings.setdefault(item["id"], item)
+            next_url = self._next_listing_url(page, page_url)
+            if next_url and next_url not in visited_pages:
+                pending.append(next_url)
+
+        jobs: list[RawJob] = []
+        for item in listings.values():
+            try:
+                detail_html = await self._get_html(item["url"])
+            except (httpx.HTTPError, SourceError) as exc:
+                logger.warning(
+                    "Skipping unavailable Teamtailor detail for %s job %s: %s",
+                    self.company.slug, item["id"], exc,
+                )
+                continue
+            soup = BeautifulSoup(detail_html, "html.parser")
+            title_node = soup.select_one("h1")
+            title = title_node.get_text(" ", strip=True) if title_node else item["title"]
+            description_node = soup.select_one(
+                "[data-job-description], #job-description, .job-description, .prose"
+            ) or soup.select_one("main")
+            if description_node is None:
+                description_node = soup.body or soup
+            description = description_node.get_text(" ", strip=True)
+            status, apply_evidence = self._apply_evidence(detail_html, item["url"])
+            department = item["department"]
+            metadata = {
+                "teamtailor": {
+                    "job_id": item["id"],
+                    "department": department,
+                    "remote_status": item["remote_status"],
+                    **apply_evidence,
+                },
+                "active_status": status.value,
+                "active_status_page_checked": True,
+                "active_status_evidence": apply_evidence,
+                "eligibility": {"work_arrangement": item["remote_status"]}
+                if item["remote_status"] else {},
+            }
+            _append_raw_job(
+                jobs,
+                "Teamtailor",
+                self.company.slug,
+                item,
+                source_company=self.company.slug,
+                external_job_id=item["id"],
+                title=title or item["title"],
+                location_raw="; ".join(value for value in (item["location"], item["remote_status"]) if value),
+                description_raw=description,
+                posted_at=None,
+                url=item["url"],
+                metadata=metadata,
+            )
+        return jobs
+
+
 SOURCE_CLASSES: dict[AtsType, type[JobSource]] = {
     AtsType.GREENHOUSE: GreenhouseSource,
     AtsType.LEVER: LeverSource,
@@ -1255,6 +1423,7 @@ SOURCE_CLASSES: dict[AtsType, type[JobSource]] = {
     AtsType.JSONLD: JsonLdSource,
     AtsType.EIGHTFOLD: EightfoldSource,
     AtsType.SUCCESSFACTORS: SuccessFactorsSource,
+    AtsType.TEAMTAILOR: TeamtailorSource,
 }
 
 

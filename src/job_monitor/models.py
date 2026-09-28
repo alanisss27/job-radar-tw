@@ -23,6 +23,7 @@ class AtsType(StrEnum):
     JSONLD = "jsonld"
     EIGHTFOLD = "eightfold"
     SUCCESSFACTORS = "successfactors"
+    TEAMTAILOR = "teamtailor"
 
 
 class ProfileName(StrEnum):
@@ -132,6 +133,7 @@ class CompanyConfig(BaseModel):
                 "public_job_url_template",
             },
             AtsType.SUCCESSFACTORS: {"search_endpoint"},
+            AtsType.TEAMTAILOR: {"listing_endpoint"},
         }[self.ats_type]
         missing = required - set(self.ats_config)
         if missing:
