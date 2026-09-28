@@ -8,6 +8,12 @@ from time import perf_counter
 
 import httpx
 
+from .active_status import (
+    ActiveStatus,
+    manual_verification_label,
+    notification_status_allows,
+    verify_if_actionable,
+)
 from .config import CandidateProfile, ProfileConfig, SearchPreferences, Settings
 from .llm import LLMEnricher
 from .matching import match_job, parse_job
@@ -245,6 +251,7 @@ async def run_pipeline(
             headers={"User-Agent": "JobRadarTW/0.1"},
         ) as client:
             runner = SourceRunner(client, settings.max_concurrency)
+            active_status_cache: dict[str, ActiveStatus] = {}
             notifier = None
             if (
                 settings.telegram_bot_token
@@ -426,15 +433,22 @@ async def run_pipeline(
                                 )
                             )
                             if should_notify:
-                                notification_message = render_job_message(
-                                    matched.company_name,
-                                    matched.job,
-                                    matched.result,
-                                    matched.first_seen_at,
-                                    is_new=matched.is_new,
-                                    changed=matched.changed,
-                                    display_timezone=settings.monitor_timezone,
+                                status = await verify_if_actionable(
+                                    should_notify, raw, client, active_status_cache
                                 )
+                                if status is not None and notification_status_allows(status):
+                                    notification_message = render_job_message(
+                                        matched.company_name,
+                                        matched.job,
+                                        matched.result,
+                                        matched.first_seen_at,
+                                        is_new=matched.is_new,
+                                        changed=matched.changed,
+                                        display_timezone=settings.monitor_timezone,
+                                    )
+                                    label = manual_verification_label(status)
+                                    if label:
+                                        notification_message += "\n\n" + label
                         decisions.append(
                             MatchDecision(
                                 profile_version=profile.version,
@@ -496,8 +510,12 @@ async def run_pipeline(
                     pending_before_delivery - len(queued),
                 )
                 for item in queued:
+                    raw = (
+                        storage.notification_job(item["job_id"], item["version_hash"])
+                        if hasattr(storage, "notification_job")
+                        else None
+                    )
                     if preferences.candidate_eligibility is not None:
-                        raw = storage.notification_job(item["job_id"], item["version_hash"])
                         rejected = (
                             candidate_rejections(raw, preferences) if raw else
                             ["eligibility_unknown: queued posting payload unavailable"]
@@ -507,6 +525,21 @@ async def run_pipeline(
                                 run_id, item["id"], item["claim_token"], "; ".join(rejected)
                             )
                             continue
+                    if raw is not None:
+                        status = await verify_if_actionable(
+                            True, raw, client, active_status_cache
+                        )
+                        if status is ActiveStatus.INACTIVE:
+                            storage.suppress_notification_claim(
+                                run_id, item["id"], item["claim_token"]
+                            )
+                            continue
+                        if status is ActiveStatus.UNKNOWN and manual_verification_label(status) not in item["message"]:
+                            item["message"] += "\n\n" + manual_verification_label(status)
+                    elif preferences.candidate_eligibility is None:
+                        item["message"] += (
+                            "\n\nActive status not confirmed — manual verification needed"
+                        )
                     if not storage.notification_claim_is_valid(
                         run_id, item["id"], item["claim_token"]
                     ):

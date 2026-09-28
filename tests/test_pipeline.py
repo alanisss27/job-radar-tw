@@ -72,6 +72,13 @@ class FakeStorage:
         claimed = sorted(self.outbox, key=lambda item: item["score"], reverse=True)[:limit]
         return [dict(item, claim_token=f"claim-{item['id']}") for item in claimed]
 
+    def notification_job(self, job_id, content_hash):
+        return None
+
+    def suppress_notification_claim(self, run_id, outbox_id, claim_token):
+        self.outbox[:] = [item for item in self.outbox if item["id"] != outbox_id]
+        return True
+
     def notification_claim_is_valid(self, run_id, outbox_id, claim_token):
         return any(item["id"] == outbox_id for item in self.outbox)
 

@@ -1501,6 +1501,18 @@ class Storage:
                     claimed.append(item)
             return claimed
 
+    def suppress_notification_claim(self, run_id: str, outbox_id: str, claim_token: str) -> bool:
+        """Remove a claimed alert after authoritative evidence says it is inactive."""
+        with self.engine.begin() as conn:
+            removed = conn.execute(
+                delete(notification_outbox).where(
+                    notification_outbox.c.id == outbox_id,
+                    notification_outbox.c.claimed_by_run_id == run_id,
+                    notification_outbox.c.claim_token == claim_token,
+                )
+            )
+            return removed.rowcount == 1
+
     def notification_job(self, job_id: str, content_hash: str) -> RawJob | None:
         """Read the exact queued version for current candidate eligibility checks."""
         with self.engine.connect() as conn:

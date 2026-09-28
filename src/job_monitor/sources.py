@@ -282,7 +282,11 @@ class GreenhouseSource(JobSource):
                 description_raw=_html_text(item.get("content")),
                 posted_at=_parse_datetime(item.get("updated_at")),
                 url=item_url,
-                metadata={"departments": item.get("departments", []), **_eligibility_metadata(item)},
+                metadata={
+                    "departments": item.get("departments", []),
+                    "active_status_evidence": {"apply_url": item.get("applyUrl")},
+                    **_eligibility_metadata(item),
+                },
             )
         return jobs
 
@@ -318,7 +322,11 @@ class LeverSource(JobSource):
                 description_raw=_html_text(item.get("descriptionPlain") or item.get("description")),
                 posted_at=_parse_datetime(item.get("createdAt")),
                 url=item_url,
-                metadata={"categories": categories, **_eligibility_metadata(item)},
+                metadata={
+                    "categories": categories,
+                    "active_status_evidence": {"apply_url": item.get("applyUrl")},
+                    **_eligibility_metadata(item),
+                },
             )
         return jobs
 
@@ -354,7 +362,11 @@ class AshbySource(JobSource):
                 ),
                 posted_at=_parse_datetime(item.get("publishedAt")),
                 url=item_url,
-                metadata={"department": item.get("department"), **_eligibility_metadata(item)},
+                metadata={
+                    "department": item.get("department"),
+                    "active_status_evidence": {"apply_url": item.get("applyUrl")},
+                    **_eligibility_metadata(item),
+                },
             )
         return jobs
 
@@ -389,6 +401,7 @@ class SmartRecruitersSource(JobSource):
                     for section in sections.values()
                     if isinstance(section, dict)
                 )
+                application_url = detail.get("applyUrl") or detail.get("applicationUrl")
                 _append_raw_job(
                     jobs,
                     "SmartRecruiters",
@@ -406,6 +419,7 @@ class SmartRecruitersSource(JobSource):
                     posted_at=_parse_datetime(item.get("releasedDate")),
                     url=f"https://jobs.smartrecruiters.com/{identifier}/{item_id}",
                     metadata={
+                        "active_status_evidence": {"apply_url": application_url},
                         **_eligibility_metadata(detail),
                         "smartrecruiters": {
                             "country_code": str(location.get("country", "")).strip().lower()
@@ -580,6 +594,7 @@ class WorkdaySource(JobSource):
                         description = str(bullet_fields)
                     eligibility_metadata = _eligibility_metadata(item)
                     location_metadata = {}
+                    active_status_evidence = {}
                     if cfg.get("detail_api_base"):
                         try:
                             detail_response = await self._request(
@@ -594,6 +609,14 @@ class WorkdaySource(JobSource):
                                     "detail availability indicates posting is closed or unavailable",
                                 )
                                 continue
+                            apply_action = (detail.get("positionUserActions") or {}).get("applyAction")
+                            active_status_evidence = {
+                                "posted": detail.get("posted"),
+                                "canApply": detail.get("canApply"),
+                                "apply_url": apply_action.get("applyUrl")
+                                if isinstance(apply_action, dict)
+                                else None,
+                            }
                             if validate_locations:
                                 primary = detail.get("location")
                                 additional = detail.get("additionalLocations") or []
@@ -732,7 +755,12 @@ class WorkdaySource(JobSource):
                         description_raw=description,
                         posted_at=_parse_datetime(item.get("postedOn")),
                         url=detail_url or f"https://{site}{external_path}",
-                        metadata={"workday": item, **location_metadata, **eligibility_metadata},
+                        metadata={
+                            "workday": item,
+                            "active_status_evidence": active_status_evidence,
+                            **location_metadata,
+                            **eligibility_metadata,
+                        },
                     )
                 offset += len(postings)
                 if not postings:
@@ -839,7 +867,11 @@ class JibeSource(JobSource):
                     description_raw=_html_text(item.get("description")),
                     posted_at=_parse_datetime(item.get("posted_date")),
                     url=item.get("apply_url") or f"{self.company.careers_url}/jobs/{item_id}",
-                    metadata={"jibe": item, **_eligibility_metadata(item)},
+                    metadata={
+                        "jibe": item,
+                        "active_status_evidence": {"apply_url": item.get("apply_url")},
+                        **_eligibility_metadata(item),
+                    },
                 )
             total = payload.get("totalCount") if isinstance(payload, dict) else None
             if not entries or (isinstance(total, int) and page * limit >= total) or len(entries) < limit:

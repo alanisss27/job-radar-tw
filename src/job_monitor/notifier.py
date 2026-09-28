@@ -27,6 +27,14 @@ def _summary_review(result: MatchResult) -> str:
     return "\n  待確認：" + (labels or "候選人資格尚未核實")
 
 
+def _active_status_note(item: MatchedJob) -> str:
+    return (
+        " — Active status not confirmed — manual verification needed"
+        if item.job.raw.metadata.get("active_status") == "unknown"
+        else ""
+    )
+
+
 def _as_utc(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=UTC)
@@ -167,7 +175,11 @@ def render_run_summary(
     ]
     unresolved_count = len(unresolved_reviews)
     reviews = [item for item in reviews if item.result.candidate_eligibility.review_visible]
-    matched_jobs = [item for item in matched_jobs if item.result.notification_eligible]
+    matched_jobs = [
+        item for item in matched_jobs
+        if item.result.notification_eligible
+        and item.job.raw.metadata.get("active_status") != "inactive"
+    ]
     fresh_matches = sum(1 for item in matched_jobs if item.is_new)
     lines = [
         f"📊 Job Radar TW｜職缺雷達 Daily Summary - {html.escape(run_key)}",
@@ -237,7 +249,7 @@ def render_run_summary(
                 f'<a href="{html.escape(str(item.job.raw.url), quote=True)}">{html.escape(item.job.raw.title)}</a> '
                 f"({_summary_score(item.result)}, "
                 f"{html.escape(item.job.raw.location_raw or '未提供')}; {html.escape(freshness)})"
-                f"{_summary_review(item.result)}"
+                f"{_summary_review(item.result)}{html.escape(_active_status_note(item))}"
             )
             shown += 1
         remaining = max_matches - shown
@@ -260,7 +272,7 @@ def render_run_summary(
                 f'<a href="{html.escape(str(item.job.raw.url), quote=True)}">{html.escape(item.job.raw.title)}</a> '
                 f"({_summary_score(item.result)}, "
                 f"{html.escape(item.job.raw.location_raw or '未提供')}; {html.escape(freshness)})"
-                f"{_summary_review(item.result)}"
+                f"{_summary_review(item.result)}{html.escape(_active_status_note(item))}"
             )
             shown += 1
         if len(matched_jobs) > shown:
