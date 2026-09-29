@@ -1586,6 +1586,271 @@ class CityOfHopeSource(JobSource):
         return raw.model_copy(update={"description_raw": body or raw.description_raw, "metadata": metadata})
 
 
+class TalentBrewSource(JobSource):
+    """Public TalentBrew/Radancy inventory with a configured company facet."""
+
+    _job_path = re.compile(r"/job/[^?#]+", re.I)
+    _req = re.compile(r"\b(?:requisition|job\s*(?:id|reference|ref)|req(?:uisition)?\s*(?:id|number|#)?)\s*[:#]?\s*(R-?\d{5,}|\d{5,})\b", re.I)
+    _date_formats = (
+        "%m/%d/%Y", "%m/%d/%y", "%b %d, %Y", "%B %d, %Y", "%Y-%m-%d",
+        "%d %b %Y", "%d %B %Y",
+    )
+
+    @classmethod
+    def _parse_date(cls, text: str | None) -> datetime | None:
+        if not text:
+            return None
+        value = text.strip()
+        iso = _parse_datetime(value)
+        if iso:
+            return iso
+        for fmt in cls._date_formats:
+            try:
+                return datetime.strptime(value, fmt).replace(tzinfo=UTC)
+            except ValueError:
+                continue
+        return None
+
+    @classmethod
+    def _card(cls, anchor):
+        node = anchor
+        for _ in range(7):
+            if node is None:
+                break
+            classes = " ".join(node.get("class", []))
+            if node.name in {"li", "article"} or re.search(r"job|result|posting", classes, re.I):
+                return node
+            node = node.parent
+        return anchor.parent or anchor
+
+    @classmethod
+    def _parse_listings(
+        cls, content: str, base_url: str, company_name: str, company_filter: str = ""
+    ) -> list[dict[str, Any]]:
+        soup = BeautifulSoup(content, "html.parser")
+        found: dict[str, dict[str, Any]] = {}
+        for anchor in soup.select("a[href]"):
+            url = urljoin(base_url, anchor["href"])
+            if not cls._job_path.search(urlsplit(url).path):
+                continue
+            card = cls._card(anchor)
+            title = anchor.get_text(" ", strip=True)
+            if not title or title.casefold() in {"view job", "read more", "apply"}:
+                heading = card.select_one("h1, h2, h3, h4")
+                title = heading.get_text(" ", strip=True) if heading else title
+            if not title:
+                continue
+            text = card.get_text(" ", strip=True)
+            company_node = card.select_one("[class*=company i], [data-company]")
+            company = company_node.get_text(" ", strip=True) if company_node else ""
+            if company and company_filter and company_filter.casefold() not in company.casefold():
+                continue
+            ref_match = cls._req.search(text)
+            requisition = ref_match.group(1).upper() if ref_match else ""
+            if requisition and not requisition.startswith("R-"):
+                requisition = f"R-{requisition.lstrip('R-')}"
+            if not requisition:
+                requisition = re.search(r"\b(R-?\d{5,})\b", url + " " + text, re.I)
+                requisition = requisition.group(1).upper() if requisition else ""
+                if requisition and not requisition.startswith("R-"):
+                    requisition = "R-" + requisition.removeprefix("R")
+            if not requisition:
+                # Do not merge unidentified postings by slug; use URL as the last identity fallback.
+                requisition = urlsplit(url).path.rstrip("/").rsplit("/", 1)[-1]
+            location_node = card.select_one("[class*=location i], [data-location], .job-location")
+            location = location_node.get_text(" ", strip=True) if location_node else ""
+            if not location:
+                match = re.search(r"\bLocation\s*:?\s*(.*?)(?=\s+(?:Company|Category|Date Posted|Requisition|Job ID)\s*:?|$)", text, re.I)
+                location = match.group(1).strip() if match else ""
+            posted_match = re.search(r"(?:Date Posted|Posted)\s*:?\s*([^|·]+?)(?=\s+(?:Closing Date|Company|Category|Location)\s*:?|$)", text, re.I)
+            category_node = card.select_one("[class*=category i], [class*=department i]")
+            category = category_node.get_text(" ", strip=True) if category_node else ""
+            arrangement = cls._arrangement(location)
+            found.setdefault(requisition, {
+                "id": requisition, "title": title, "url": url, "location": location,
+                "company": company or company_name, "category": category,
+                "posted_at": cls._parse_date(posted_match.group(1) if posted_match else None),
+                "arrangement": arrangement, "listing_text": text,
+            })
+        return list(found.values())
+
+    @staticmethod
+    def _arrangement(text: str) -> str:
+        if re.search(r"\bremote\b", text, re.I):
+            return "Remote"
+        if re.search(r"\bhybrid\b", text, re.I):
+            return "Hybrid"
+        if re.search(r"\b(?:onsite|on-site|office based)\b", text, re.I):
+            return "Onsite"
+        return ""
+
+    @staticmethod
+    def _query_url(endpoint: str, params: dict[str, Any]) -> str:
+        parts = urlsplit(endpoint)
+        query = dict(parse_qsl(parts.query, keep_blank_values=True))
+        query.update({str(key): str(value) for key, value in params.items() if value is not None})
+        return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), ""))
+
+    @retry(
+        stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=8),
+        retry=retry_if_exception_type(httpx.HTTPError), reraise=True,
+    )
+    async def _get(self, url: str) -> str:
+        response = await self.client.get(url, timeout=20, follow_redirects=True)
+        response.raise_for_status()
+        return response.text
+
+    @staticmethod
+    def _detail_fields(content: str, detail_url: str, company_name: str) -> dict[str, Any]:
+        soup = BeautifulSoup(content, "html.parser")
+        text = soup.get_text(" ", strip=True)
+        title_node = soup.select_one("h1, [itemprop=title]")
+        title = title_node.get_text(" ", strip=True) if title_node else ""
+        ref_match = TalentBrewSource._req.search(text)
+        requisition = ref_match.group(1).upper() if ref_match else ""
+        if requisition and not requisition.startswith("R-"):
+            requisition = "R-" + requisition.removeprefix("R")
+        canonical = soup.select_one("link[rel=canonical][href]")
+        url = urljoin(detail_url, canonical.get("href")) if canonical else detail_url
+        description_node = soup.select_one("[itemprop=description], .job-description, #job-description, .job-details")
+        if description_node is None:
+            description_node = soup.select_one("main") or soup.body or soup
+        location_node = soup.select_one("[itemprop=jobLocation], [class*=location i], [data-location]")
+        location = location_node.get_text(" ", strip=True) if location_node else ""
+        def labeled(label: str) -> str:
+            match = re.search(rf"\b{label}\s*:?\s*(.*?)(?=\s+(?:Date Posted|Closing Date|Location|Company|Category|Requisition|Job ID|Salary|Compensation)\s*:?|$)", text, re.I)
+            return match.group(1).strip() if match else ""
+        posted = TalentBrewSource._parse_date(
+            labeled("Date Posted") or labeled("Posting Date") or labeled("Posted")
+        )
+        closing = TalentBrewSource._parse_date(
+            labeled("Closing Date") or labeled("Apply By") or labeled("Application Deadline")
+        )
+        company_node = soup.select_one("[class*=company i], [data-company]")
+        company = company_node.get_text(" ", strip=True) if company_node else company_name
+        category_node = soup.select_one("[class*=category i], [class*=department i]")
+        category = category_node.get_text(" ", strip=True) if category_node else labeled("Category")
+        salary = labeled("Salary") or labeled("Compensation")
+        arrangement = TalentBrewSource._arrangement(location)
+        apply_action = None
+        for node in soup.select("a[href], button, input[type=submit]"):
+            label = " ".join((node.get_text(" ", strip=True), node.get("aria-label", ""), node.get("value", ""))).strip()
+            if re.fullmatch(r"apply(?: now)?", label, re.I):
+                href = node.get("href", "").strip()
+                if href and href != "#" and not href.casefold().startswith("javascript:"):
+                    apply_action = urljoin(detail_url, href)
+                elif node.name in {"button", "input"} and not node.has_attr("disabled"):
+                    apply_action = "enabled-action"
+                if apply_action:
+                    break
+        page_status_value = page_status(content)
+        if closing and closing.date() < datetime.now(UTC).date():
+            status = ActiveStatus.INACTIVE
+        elif page_status_value is ActiveStatus.INACTIVE:
+            status = ActiveStatus.INACTIVE
+        elif apply_action and page_status_value is ActiveStatus.ACTIVE:
+            status = ActiveStatus.ACTIVE
+        else:
+            status = ActiveStatus.UNKNOWN
+        return {
+            "title": title, "requisition_id": requisition, "url": url,
+            "location": location, "company": company, "category": category,
+            "description": description_node.get_text(" ", strip=True),
+            "posted_at": posted, "closing_date": closing, "salary": salary,
+            "arrangement": arrangement, "apply_action": apply_action,
+            "active_status": status,
+        }
+
+    async def fetch(self) -> list[RawJob]:
+        config = self.company.ats_config
+        endpoint = str(config["listing_endpoint"])
+        filter_config = config["company_filter"]
+        params = {filter_config["parameter"]: filter_config["value"]}
+        params.update(config.get("search_params", {}))
+        page_parameter = config.get("page_parameter", "page")
+        page_size = int(config.get("page_size", 15))
+        found: dict[str, dict[str, Any]] = {}
+        for page_number in range(1, 101):
+            page_params = dict(params)
+            if page_number > 1:
+                page_params[page_parameter] = page_number
+            html = await self._get(self._query_url(endpoint, page_params))
+            rows = self._parse_listings(
+                html,
+                endpoint,
+                str(config.get("brand_label", self.company.name)),
+                str(filter_config["value"]),
+            )
+            if not rows:
+                break
+            for row in rows:
+                found.setdefault(row["id"], row)
+            if len(rows) < page_size:
+                break
+
+        jobs_by_requisition: dict[str, RawJob] = {}
+        seen_detail_urls: set[str] = set()
+        for row in found.values():
+            if row["url"] in seen_detail_urls:
+                continue
+            seen_detail_urls.add(row["url"])
+            try:
+                detail = await self._get(row["url"])
+                fields = self._detail_fields(detail, row["url"], str(config.get("brand_label", self.company.name)))
+                detail_url = fields["url"]
+                title = fields["title"] or row["title"]
+                external_id = fields["requisition_id"] or row["id"]
+                location = fields["location"] or row["location"]
+                arrangement = fields["arrangement"] or row["arrangement"]
+                status = fields["active_status"]
+                metadata = {
+                    "talentbrew": {
+                        "requisition_id": external_id,
+                        "company": fields["company"] or row["company"],
+                        "category": fields["category"] or row["category"],
+                        "closing_date": fields["closing_date"].isoformat() if fields["closing_date"] else None,
+                        "salary": fields["salary"], "apply_url": fields["apply_action"],
+                        "work_arrangement": arrangement,
+                    },
+                    "active_status": status.value,
+                    "active_status_page_checked": True,
+                    "active_status_evidence": {"apply_url": fields["apply_action"]}
+                    if fields["apply_action"] and status is ActiveStatus.ACTIVE else {},
+                    "eligibility": {"work_arrangement": arrangement} if arrangement else {},
+                }
+                normalized: list[RawJob] = []
+                _append_raw_job(normalized, "TalentBrew", self.company.slug, row,
+                    source_company=self.company.slug, external_job_id=external_id,
+                    title=title, location_raw=location,
+                    description_raw=fields["description"] or row["listing_text"],
+                    posted_at=fields["posted_at"] or row["posted_at"], url=detail_url, metadata=metadata)
+                if normalized:
+                    jobs_by_requisition.setdefault(external_id, normalized[0])
+            except (httpx.HTTPError, SourceError) as exc:
+                logger.warning("Unavailable TalentBrew detail for %s %s: %s", self.company.slug, row["id"], exc)
+                external_id = row["id"]
+                metadata = {
+                    "talentbrew": {
+                        "requisition_id": external_id, "company": row["company"],
+                        "category": row["category"], "work_arrangement": row["arrangement"],
+                    },
+                    "active_status": ActiveStatus.UNKNOWN.value,
+                    "active_status_page_checked": True,
+                    "active_status_evidence": {},
+                    "eligibility": {"work_arrangement": row["arrangement"]}
+                    if row["arrangement"] else {},
+                }
+                fallback: list[RawJob] = []
+                _append_raw_job(fallback, "TalentBrew", self.company.slug, row,
+                    source_company=self.company.slug, external_job_id=external_id,
+                    title=row["title"], location_raw=row["location"],
+                    description_raw=row["listing_text"], posted_at=row["posted_at"],
+                    url=row["url"], metadata=metadata)
+                if fallback:
+                    jobs_by_requisition.setdefault(external_id, fallback[0])
+        return list(jobs_by_requisition.values())
+
+
 SOURCE_CLASSES: dict[AtsType, type[JobSource]] = {
     AtsType.GREENHOUSE: GreenhouseSource,
     AtsType.LEVER: LeverSource,
@@ -1599,6 +1864,7 @@ SOURCE_CLASSES: dict[AtsType, type[JobSource]] = {
     AtsType.SUCCESSFACTORS: SuccessFactorsSource,
     AtsType.TEAMTAILOR: TeamtailorSource,
     AtsType.CITY_OF_HOPE: CityOfHopeSource,
+    AtsType.TALENTBREW: TalentBrewSource,
 }
 
 

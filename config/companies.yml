@@ -23,6 +23,25 @@ companies:
     priority: 1
     enabled: true
     source_verified: true
+  - slug: alexion-astrazeneca-rare-disease
+    name: Alexion, AstraZeneca Rare Disease
+    careers_url: https://careers.astrazeneca.com/search-jobs/global?orgIds=7684
+    ats_type: talentbrew
+    ats_config:
+      listing_endpoint: https://careers.astrazeneca.com/search-jobs/results
+      company_filter:
+        parameter: custom_fields.jobPostingSite
+        value: Alexion
+      search_params:
+        orgIds: 7684
+      page_parameter: page
+      page_size: 15
+      brand_label: Alexion, AstraZeneca Rare Disease
+    industry: pharmaceutical
+    profiles: [clinical-discovery]
+    priority: 1
+    enabled: true
+    source_verified: true
   # Resolve LSU's hiringCompany facet by the exact Pennington unit name each run.
   # Workday refuses the fetch if this employer facet stops resolving.
   - slug: pennington-biomedical-research-center

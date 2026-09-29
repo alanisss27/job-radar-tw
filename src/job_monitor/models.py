@@ -25,6 +25,7 @@ class AtsType(StrEnum):
     SUCCESSFACTORS = "successfactors"
     TEAMTAILOR = "teamtailor"
     CITY_OF_HOPE = "city_of_hope"
+    TALENTBREW = "talentbrew"
 
 
 class ProfileName(StrEnum):
@@ -136,6 +137,7 @@ class CompanyConfig(BaseModel):
             AtsType.SUCCESSFACTORS: {"search_endpoint"},
             AtsType.TEAMTAILOR: {"listing_endpoint"},
             AtsType.CITY_OF_HOPE: {"listing_endpoint"},
+            AtsType.TALENTBREW: {"listing_endpoint", "company_filter"},
         }[self.ats_type]
         missing = required - set(self.ats_config)
         if missing:
