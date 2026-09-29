@@ -24,6 +24,7 @@ class AtsType(StrEnum):
     EIGHTFOLD = "eightfold"
     SUCCESSFACTORS = "successfactors"
     TEAMTAILOR = "teamtailor"
+    CITY_OF_HOPE = "city_of_hope"
 
 
 class ProfileName(StrEnum):
@@ -134,6 +135,7 @@ class CompanyConfig(BaseModel):
             },
             AtsType.SUCCESSFACTORS: {"search_endpoint"},
             AtsType.TEAMTAILOR: {"listing_endpoint"},
+            AtsType.CITY_OF_HOPE: {"listing_endpoint"},
         }[self.ats_type]
         missing = required - set(self.ats_config)
         if missing:
@@ -215,6 +217,9 @@ class RawJob(BaseModel):
 
     @property
     def content_hash(self) -> str:
+        city_data = self.metadata.get("city_of_hope")
+        if isinstance(city_data, dict) and city_data.get("listing_hash"):
+            return str(city_data["listing_hash"])
         normalized = "|".join(
             [
                 self.title.strip(),

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import email.utils
+import hashlib
 import json
 import logging
 import random
@@ -11,7 +12,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
-from urllib.parse import parse_qsl, urljoin, urlsplit
+from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 
 import httpx
 from bs4 import BeautifulSoup
@@ -1412,6 +1413,179 @@ class TeamtailorSource(JobSource):
         return jobs
 
 
+class CityOfHopeSource(JobSource):
+    """Server-rendered City of Hope listings, hydrating only matched candidates."""
+
+    _job_link = re.compile(r"/job/[^?#]+", re.I)
+    _remote = re.compile(r"United States\s*\(This is a remote job\)", re.I)
+    _job_ref = re.compile(
+        r"\b(?:Job\s+Ref(?:erence)?|Req(?:uisition)?(?:\s+ID)?|Reference)\s*[:#]?\s*([A-Z0-9-]+)",
+        re.I,
+    )
+
+    @staticmethod
+    def _card_for(anchor):
+        node = anchor
+        for _ in range(6):
+            if node is None:
+                break
+            text = node.get_text(" ", strip=True)
+            if len(text) > len(anchor.get_text(" ", strip=True)) + 10 and len(text) < 5000:
+                return node
+            node = node.parent
+        return anchor.parent or anchor
+
+    @classmethod
+    def _listing_items(cls, content: str, base_url: str) -> list[dict[str, Any]]:
+        soup = BeautifulSoup(content, "html.parser")
+        items: dict[str, dict[str, Any]] = {}
+        for anchor in soup.select("a[href]"):
+            detail_url = urljoin(base_url, anchor["href"])
+            if not cls._job_link.search(urlsplit(detail_url).path):
+                continue
+            title = anchor.get_text(" ", strip=True)
+            card = cls._card_for(anchor)
+            text = card.get_text(" ", strip=True)
+            if not title or title.casefold() in {"view job", "apply", "learn more"}:
+                heading = card.select_one("h2, h3, h4")
+                title = heading.get_text(" ", strip=True) if heading else title
+            if not title:
+                continue
+            ref_match = cls._job_ref.search(text)
+            job_ref = ref_match.group(1) if ref_match else ""
+            # The visible Job Ref is the public requisition identity. Retain a URL fallback.
+            path_id = re.search(r"/(\d+)(?:/|$)", urlsplit(detail_url).path)
+            job_id = job_ref or (path_id.group(1) if path_id else detail_url)
+            location_node = card.select_one(".job-location, [class*=location i], [data-location]")
+            location = location_node.get_text(" ", strip=True) if location_node else ""
+            if not location:
+                location_match = re.search(
+                    r"(?:Location|Locations)\s*:?\s*(.*?)(?=\s+(?:Category|Job Category|Job Type|Shift|Pay Range|Job Ref|Description)\s*:?|$)",
+                    text, re.I,
+                )
+                location = location_match.group(1).strip(" |·") if location_match else ""
+            remote = bool(cls._remote.search(text))
+            if remote:
+                location = re.sub(cls._remote, "United States", location or text).strip()
+            def field(*labels: str) -> str:
+                pattern = r"(?:" + "|".join(labels) + r")\s*:?\s*(.*?)(?=\s+(?:Category|Job Category|Job Type|Shift|Pay Range|Compensation|Job Ref|Location|Description)\s*:?|$)"
+                match = re.search(pattern, text, re.I)
+                return match.group(1).strip(" |·") if match else ""
+            excerpt_node = card.select_one(".job-description, .job-excerpt, [class*=description i], p")
+            excerpt = excerpt_node.get_text(" ", strip=True) if excerpt_node else text
+            category = field("Category", "Job Category")
+            job_type = field("Job Type", "Employment Type")
+            shift = field("Shift")
+            pay_match = re.search(
+                r"\$[\d,]+(?:\.\d{2})?\s*(?:-|to)\s*\$?[\d,]+(?:\.\d{2})?(?:\s*/?\s*(?:hr|hour|year|yr))?",
+                text,
+                re.I,
+            )
+            pay = pay_match.group(0).strip() if pay_match else field(
+                "Pay Range", "Compensation", "Hourly Pay"
+            )
+            listing_hash = hashlib.sha256(
+                "|".join((title, job_ref, location, category, job_type, shift, pay, excerpt)).encode()
+            ).hexdigest()
+            items.setdefault(job_id, {
+                "id": job_id, "job_ref": job_ref, "title": title, "url": detail_url,
+                "location": location, "remote": remote, "category": category,
+                "job_type": job_type, "shift": shift, "pay_range": pay,
+                "excerpt": excerpt, "listing_hash": listing_hash,
+            })
+        return list(items.values())
+
+    @staticmethod
+    def _next_page_url(endpoint: str, page: int) -> str:
+        parts = urlsplit(endpoint)
+        query = [(key, value) for key, value in parse_qsl(parts.query) if key != "page_jobs"]
+        query.append(("page_jobs", str(page)))
+        return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), ""))
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=8),
+        retry=retry_if_exception_type(httpx.HTTPError),
+        reraise=True,
+    )
+    async def _get(self, url: str) -> httpx.Response:
+        response = await self.client.get(url, timeout=20, follow_redirects=True)
+        response.raise_for_status()
+        return response
+
+    async def fetch(self) -> list[RawJob]:
+        endpoint = str(self.company.ats_config["listing_endpoint"])
+        jobs: list[RawJob] = []
+        seen: set[str] = set()
+        for page_number in range(1, 101):
+            url = endpoint if page_number == 1 else self._next_page_url(endpoint, page_number)
+            response = await self._get(url)
+            items = self._listing_items(response.text, url)
+            if not items:
+                break
+            for item in items:
+                if item["id"] in seen:
+                    continue
+                seen.add(item["id"])
+                remote_evidence = "United States (This is a remote job)" if item["remote"] else ""
+                metadata = {
+                    "city_of_hope": {
+                        "job_ref": item["job_ref"], "detail_url": item["url"],
+                        "category": item["category"], "job_type": item["job_type"],
+                        "shift": item["shift"], "pay_range": item["pay_range"],
+                        "listing_excerpt": item["excerpt"], "listing_hash": item["listing_hash"],
+                        "remote_status": "remote" if item["remote"] else "",
+                    },
+                    "eligibility": {"work_arrangement": "remote"} if item["remote"] else {},
+                }
+                _append_raw_job(jobs, "City of Hope", self.company.slug, item,
+                    source_company=self.company.slug, external_job_id=item["id"],
+                    title=item["title"],
+                    location_raw="; ".join(x for x in (item["location"], remote_evidence) if x),
+                    description_raw=item["excerpt"], posted_at=None, url=item["url"], metadata=metadata)
+            if len(items) < 20:
+                break
+        return jobs
+
+    async def hydrate(self, raw: RawJob) -> RawJob:
+        city_data = raw.metadata.get("city_of_hope", {})
+        detail_url = city_data.get("detail_url")
+        if not detail_url or city_data.get("detail_checked"):
+            return raw
+        metadata = dict(raw.metadata)
+        city_data = dict(city_data)
+        try:
+            response = await self.client.get(detail_url, timeout=20, follow_redirects=True)
+        except httpx.HTTPError:
+            city_data["detail_checked"] = True
+            metadata["city_of_hope"] = city_data
+            metadata["active_status"] = ActiveStatus.UNKNOWN.value
+            metadata["active_status_page_checked"] = True
+            metadata["active_status_evidence"] = {}
+            return raw.model_copy(update={"metadata": metadata})
+        if response.status_code >= 400:
+            city_data["detail_checked"] = True
+            metadata["city_of_hope"] = city_data
+            metadata["active_status"] = ActiveStatus.UNKNOWN.value
+            metadata["active_status_page_checked"] = True
+            metadata["active_status_evidence"] = {}
+            return raw.model_copy(update={"metadata": metadata})
+        soup = BeautifulSoup(response.text, "html.parser")
+        description = soup.select_one(".job-description, #job-description, [itemprop=description]")
+        if description is None:
+            description = soup.select_one("main") or soup.body or soup
+        body = description.get_text(" ", strip=True)
+        status = page_status(response.text)
+        city_data.update({"detail_checked": True, "description": body})
+        metadata.update({
+            "city_of_hope": city_data,
+            "active_status": status.value,
+            "active_status_page_checked": True,
+            "active_status_evidence": {"official_detail_checked": True},
+        })
+        return raw.model_copy(update={"description_raw": body or raw.description_raw, "metadata": metadata})
+
+
 SOURCE_CLASSES: dict[AtsType, type[JobSource]] = {
     AtsType.GREENHOUSE: GreenhouseSource,
     AtsType.LEVER: LeverSource,
@@ -1424,6 +1598,7 @@ SOURCE_CLASSES: dict[AtsType, type[JobSource]] = {
     AtsType.EIGHTFOLD: EightfoldSource,
     AtsType.SUCCESSFACTORS: SuccessFactorsSource,
     AtsType.TEAMTAILOR: TeamtailorSource,
+    AtsType.CITY_OF_HOPE: CityOfHopeSource,
 }
 
 
@@ -1448,3 +1623,9 @@ class SourceRunner:
     async def fetch(self, company: CompanyConfig) -> list[RawJob]:
         jobs, _warnings = await self.fetch_with_warnings(company)
         return jobs
+
+    async def hydrate_candidate(self, company: CompanyConfig, raw: RawJob) -> RawJob:
+        source_class = SOURCE_CLASSES[company.ats_type]
+        source = source_class(company, self.client)
+        hydrate = getattr(source, "hydrate", None)
+        return await hydrate(raw) if hydrate else raw

@@ -12,6 +12,17 @@ companies:
     priority: 1
     enabled: true
     source_verified: true
+  - slug: city-of-hope
+    name: City of Hope
+    careers_url: https://www.cityofhopejobs.org/jobs/
+    ats_type: city_of_hope
+    ats_config:
+      listing_endpoint: https://www.cityofhopejobs.org/jobs/
+    industry: biomedical-research
+    profiles: [clinical-discovery]
+    priority: 1
+    enabled: true
+    source_verified: true
   # Resolve LSU's hiringCompany facet by the exact Pennington unit name each run.
   # Workday refuses the fetch if this employer facet stops resolving.
   - slug: pennington-biomedical-research-center

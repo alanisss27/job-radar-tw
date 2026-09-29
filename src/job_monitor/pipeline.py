@@ -41,6 +41,26 @@ def _supports_batch_persistence(storage: Storage) -> bool:
     )
 
 
+def _potential_city_of_hope_candidate(results: list[MatchResult]) -> bool:
+    return any(
+        result.eligible
+        or result.discovery_eligible
+        or result.needs_eligibility_review
+        or any(
+            reason.startswith((
+                "clinical coordination:",
+                "clinical project support:",
+                "clinical trial manager:",
+                "transferable life-science PM:",
+                "discovery title family:",
+                "responsibilities:",
+            ))
+            for reason in result.reasons
+        )
+        for result in results
+    )
+
+
 @dataclass
 class RunReport:
     run_key: str
@@ -474,6 +494,34 @@ async def run_pipeline(
                                 [],
                             )
                         continue
+
+                    if raw.metadata.get("city_of_hope") and hasattr(runner, "hydrate_candidate"):
+                        preliminary = [
+                            match_job(
+                                parsed,
+                                profiles[profile_name],
+                                preferences,
+                                resume,
+                                visa_sponsorship_required=settings.visa_sponsorship_required,
+                                company_visa_support=company.visa_support,
+                                candidate=candidate,
+                                company_ndx_member=company.ndx_member,
+                            )
+                            for profile_name in company.profiles
+                        ]
+                        potential = _potential_city_of_hope_candidate(preliminary)
+                        if potential:
+                            raw = await runner.hydrate_candidate(company, raw)
+                            parsed = parse_job(raw)
+                            # City of Hope hashes listing fields for stable change detection;
+                            # recompute the plan so the hydrated payload is still persisted.
+                            plan = (
+                                storage.plan_job_from_index(raw, job_index.get(raw.stable_external_id))
+                                if use_batch
+                                else storage.plan_job(company_id, raw)
+                                if storage
+                                else plan
+                            )
 
                     decisions: list[MatchDecision] = []
                     eligible_matches: list[MatchedJob] = []
