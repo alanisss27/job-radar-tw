@@ -570,6 +570,9 @@ companies:
     priority: 2
     enabled: true
     source_verified: true
+  # Temporarily paused: the legacy JSON feed returns 403 and Cloudflare blocks
+  # ordinary HTTP access to the official listing. Re-enable after a browser-capable
+  # or otherwise authorized retrieval method is available.
   - slug: syneos-health
     name: Syneos Health
     careers_url: https://www.syneoshealth.com/careers/search/full-time-clinical/jobs
@@ -580,7 +583,7 @@ companies:
     industry: clinical-services
     profiles: [clinical-discovery]
     priority: 2
-    enabled: true
+    enabled: false
     source_verified: true
   - slug: medpace
     name: Medpace
