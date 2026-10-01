@@ -1,6 +1,20 @@
 # Registry entries are intentionally explicit. `source_verified` means a live API
 # response has been checked, not merely that the company is a desired target.
 companies:
+  - slug: avance-clinical
+    name: Avance Clinical
+    careers_url: https://www.avancecro.com/careers/
+    ats_type: jobadder_widget
+    ats_config:
+      listing_endpoint: https://apps.jobadder.com/widgets/V1/Jobs/RenderJobList
+      detail_endpoint: https://apps.jobadder.com/widgets/V1/Jobs/RenderJobDetails
+      key: AU6_kuh2megdddpelmwqvkd6nomcjq
+      location_classification_id: "23521"
+    industry: clinical-services
+    profiles: [clinical-discovery]
+    priority: 1
+    enabled: true
+    source_verified: true
   - slug: kps-life
     name: KPS Life
     careers_url: https://kpslife.com/careers/

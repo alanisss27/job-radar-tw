@@ -2195,6 +2195,164 @@ class TalentBrewSource(JobSource):
         return list(jobs_by_requisition.values())
 
 
+class JobAdderWidgetSource(JobSource):
+    """Public JSONP/HTML inventory with candidate-only description hydration."""
+
+    PAGE_SIZE = 6
+    CALLBACK = "radar"
+
+    @classmethod
+    def _decode(cls, body: str) -> str:
+        match = re.fullmatch(r"\s*" + cls.CALLBACK + r"\((.*)\);?\s*", body, re.S)
+        if not match:
+            raise SourceError("JobAdder: malformed JSONP wrapper")
+        try:
+            fragment = json.loads(match[1])
+        except ValueError as exc:
+            raise SourceError("JobAdder: malformed JSONP payload") from exc
+        if not isinstance(fragment, str) or not fragment.strip():
+            raise SourceError("JobAdder: missing HTML fragment")
+        return fragment
+
+    async def _fragment(self, endpoint: str, **params: Any) -> BeautifulSoup:
+        response = await self.client.get(
+            str(self.company.ats_config[endpoint]),
+            params={"key": self.company.ats_config["key"], "callback": self.CALLBACK, **params},
+        )
+        response.raise_for_status()
+        return BeautifulSoup(self._decode(response.text), "html.parser")
+
+    async def _page(self, number: int) -> tuple[list, int]:
+        soup = await self._fragment(
+            "listing_endpoint",
+            pageNumber=number,
+            jobsPerPage=self.PAGE_SIZE,
+            showHotJobsOnly="false",
+            showPagerSummary="true",
+            alwaysShowPager="true",
+            showDatePosted="true",
+            dateFormat="yyyy-MM-dd",
+            showClassifications="true",
+            titleIsLink="true",
+        )
+        containers = soup.select(".ja-job-list-container")
+        if len(containers) != 1:
+            raise SourceError("JobAdder: missing inventory container")
+        container = containers[0]
+        jobs = container.select(".ja-job-list > .job")
+        summaries = container.select(".ja-pager-summary")
+        if not jobs:
+            empty = container.select_one(".no-jobs-content")
+            if empty is None or not empty.get_text(strip=True) or summaries:
+                raise SourceError("JobAdder: malformed empty inventory")
+            return [], 0
+        if container.select_one(".no-jobs-content") or len(summaries) != 1:
+            raise SourceError("JobAdder: missing or conflicting pagination")
+        match = re.fullmatch(r"Page (\d+) of (\d+)", summaries[0].get_text(" ", strip=True))
+        if not match or int(match[1]) != number or not number <= int(match[2]) <= 1000:
+            raise SourceError("JobAdder: inconsistent pagination")
+        pages = int(match[2])
+        if len(jobs) > self.PAGE_SIZE or (number < pages and len(jobs) != self.PAGE_SIZE):
+            raise SourceError("JobAdder: incomplete inventory page")
+        return jobs, pages
+
+    def _raw(self, item: Any) -> RawJob:
+        title = item.select_one(".title [data-job-id]")
+        job_id = title.get("data-job-id", "") if title else ""
+        if not re.fullmatch(r"[0-9]+", job_id) or not title.get_text(strip=True):
+            raise SourceError("JobAdder: missing job ID or title")
+        if any(node.get("data-job-id") != job_id for node in item.select("[data-job-id]")):
+            raise SourceError("JobAdder: conflicting job IDs")
+        summary = item.select_one(".summary")
+        if summary is None:
+            raise SourceError("JobAdder: missing summary")
+        classifications: dict[str, list[str]] = {}
+        for node in item.select(".classifications li"):
+            key, value = node.get("data-id"), node.get_text(" ", strip=True)
+            if not key or not value:
+                raise SourceError("JobAdder: malformed classification")
+            classifications.setdefault(key, []).append(value)
+        date = item.select_one(".date-posted")
+        date_text = date.get_text(strip=True) if date else ""
+        posted_at = _parse_datetime(date_text)
+        if date_text and posted_at is None:
+            raise SourceError("JobAdder: malformed posted date")
+        parts = urlsplit(str(self.company.careers_url))
+        query = [(k, v) for k, v in parse_qsl(parts.query) if k != "ja-job"]
+        query.append(("ja-job", job_id))
+        raw = RawJob(
+            source_company=self.company.slug,
+            external_job_id=job_id,
+            title=title.get_text(" ", strip=True),
+            location_raw="; ".join(
+                dict.fromkeys(
+                    classifications.get(
+                        str(self.company.ats_config["location_classification_id"]), []
+                    )
+                )
+            ),
+            description_raw=" ".join(summary.get_text(" ", strip=True).split()),
+            posted_at=posted_at,
+            url=urlunsplit(parts._replace(query=urlencode(query), fragment="")),
+        )
+        fingerprint = json.dumps(
+            [raw.content_hash, date_text, classifications],
+            sort_keys=True,
+        )
+        raw.metadata = {
+            "jobadder_widget": {
+                "classifications": classifications,
+                "listing_hash": hashlib.sha256(fingerprint.encode()).hexdigest(),
+            }
+        }
+        return raw
+
+    async def fetch(self) -> list[RawJob]:
+        items, pages = await self._page(1)
+        if not pages:
+            return []
+        jobs: list[RawJob] = []
+        seen: set[str] = set()
+        for number in range(1, pages + 1):
+            if number > 1:
+                items, current_pages = await self._page(number)
+                if current_pages != pages:
+                    raise SourceError("JobAdder: changing page count")
+            for item in items:
+                raw = self._raw(item)
+                if raw.stable_external_id in seen:
+                    raise SourceError("JobAdder: repeated job ID/page")
+                seen.add(raw.stable_external_id)
+                jobs.append(raw)
+        terminal, terminal_pages = await self._page(pages + 1)
+        if terminal or terminal_pages:
+            raise SourceError("JobAdder: unexpected terminal page")
+        return jobs
+
+    async def hydrate(self, raw: RawJob) -> RawJob:
+        data = raw.metadata["jobadder_widget"]
+        if data.get("detail_checked"):
+            return raw
+        soup = await self._fragment("detail_endpoint", jobID=raw.stable_external_id)
+        description = soup.select_one(".ja-job-details .description")
+        title = soup.select_one(".ja-job-details .title")
+        if title is None or title.get_text(" ", strip=True) != raw.title:
+            raise SourceError("JobAdder: detail title does not match inventory")
+        body = _html_text(str(description)) if description is not None else ""
+        if not body:
+            raise SourceError("JobAdder: missing full description")
+        return raw.model_copy(
+            update={
+                "description_raw": body,
+                "metadata": {
+                    **raw.metadata,
+                    "jobadder_widget": {**data, "detail_checked": True},
+                    **_eligibility_metadata({"description": body}),
+                },
+            }
+        )
+
+
 class DynamicsAtsSource(JobSource):
     """Complete Dynamics ATS feed; the public board paginates locally."""
 
@@ -2418,6 +2576,7 @@ class OracleSource(JobSource):
 
 
 SOURCE_CLASSES: dict[AtsType, type[JobSource]] = {
+    AtsType.JOBADDER_WIDGET: JobAdderWidgetSource,
     AtsType.DYNAMICS_ATS: DynamicsAtsSource,
     AtsType.ORACLE: OracleSource,
     AtsType.GREENHOUSE: GreenhouseSource,

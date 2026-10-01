@@ -29,6 +29,7 @@ class AtsType(StrEnum):
     CHARTER_RESEARCH = "charter_research"
     ORACLE = "oracle"
     DYNAMICS_ATS = "dynamics_ats"
+    JOBADDER_WIDGET = "jobadder_widget"
 
 
 class ProfileName(StrEnum):
@@ -144,6 +145,12 @@ class CompanyConfig(BaseModel):
             AtsType.CHARTER_RESEARCH: {"listing_endpoint"},
             AtsType.ORACLE: {"listing_endpoint", "site_number"},
             AtsType.DYNAMICS_ATS: {"listing_endpoint", "form_id"},
+            AtsType.JOBADDER_WIDGET: {
+                "listing_endpoint",
+                "detail_endpoint",
+                "key",
+                "location_classification_id",
+            },
         }[self.ats_type]
         missing = required - set(self.ats_config)
         if missing:
@@ -225,6 +232,9 @@ class RawJob(BaseModel):
 
     @property
     def content_hash(self) -> str:
+        jobadder_data = self.metadata.get("jobadder_widget")
+        if isinstance(jobadder_data, dict) and jobadder_data.get("listing_hash"):
+            return str(jobadder_data["listing_hash"])
         oracle_data = self.metadata.get("oracle")
         if isinstance(oracle_data, dict) and oracle_data.get("listing_hash"):
             return str(oracle_data["listing_hash"])
