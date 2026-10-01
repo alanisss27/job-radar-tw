@@ -26,6 +26,7 @@ class AtsType(StrEnum):
     TEAMTAILOR = "teamtailor"
     CITY_OF_HOPE = "city_of_hope"
     TALENTBREW = "talentbrew"
+    CHARTER_RESEARCH = "charter_research"
 
 
 class ProfileName(StrEnum):
@@ -138,6 +139,7 @@ class CompanyConfig(BaseModel):
             AtsType.TEAMTAILOR: {"listing_endpoint"},
             AtsType.CITY_OF_HOPE: {"listing_endpoint"},
             AtsType.TALENTBREW: {"listing_endpoint", "company_filter"},
+            AtsType.CHARTER_RESEARCH: {"listing_endpoint"},
         }[self.ats_type]
         missing = required - set(self.ats_config)
         if missing:
@@ -222,6 +224,9 @@ class RawJob(BaseModel):
         city_data = self.metadata.get("city_of_hope")
         if isinstance(city_data, dict) and city_data.get("listing_hash"):
             return str(city_data["listing_hash"])
+        charter_data = self.metadata.get("charter_research")
+        if isinstance(charter_data, dict) and charter_data.get("listing_hash"):
+            return str(charter_data["listing_hash"])
         normalized = "|".join(
             [
                 self.title.strip(),

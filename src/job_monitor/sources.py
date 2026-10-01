@@ -1586,6 +1586,120 @@ class CityOfHopeSource(JobSource):
         return raw.model_copy(update={"description_raw": body or raw.description_raw, "metadata": metadata})
 
 
+class CharterResearchSource(JobSource):
+    """Charter's same-domain HTML job table; details are hydrated for candidates only."""
+
+    _job_path = re.compile(r"/careers/job/(\d+)/?$", re.I)
+
+    @classmethod
+    def _listing_items(cls, content: str, base_url: str) -> list[dict[str, Any]]:
+        soup = BeautifulSoup(content, "html.parser")
+        jobs: dict[str, dict[str, Any]] = {}
+        for anchor in soup.select("a[href]"):
+            detail_url = urljoin(base_url, anchor["href"])
+            match = cls._job_path.fullmatch(urlsplit(detail_url).path)
+            title = anchor.get_text(" ", strip=True)
+            if not match or not title:
+                continue
+            row = anchor.find_parent("tr")
+            cells = row.find_all("td", recursive=False) if row else []
+            location = ""
+            if cells:
+                title_cell = anchor.find_parent("td")
+                other_cells = [
+                    cell.get_text(" ", strip=True) for cell in cells if cell is not title_cell
+                ]
+                location = next((value for value in other_cells if value and value != title), "")
+            job_id = match.group(1)
+            listing_hash = hashlib.sha256(
+                "|".join((job_id, title, location, detail_url)).encode()
+            ).hexdigest()
+            jobs.setdefault(job_id, {
+                "id": job_id, "title": title, "location": location,
+                "url": detail_url, "listing_hash": listing_hash,
+            })
+        return list(jobs.values())
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=8),
+        retry=retry_if_exception_type(httpx.HTTPError),
+        reraise=True,
+    )
+    async def _get(self, url: str) -> httpx.Response:
+        response = await self.client.get(url, timeout=20, follow_redirects=True)
+        response.raise_for_status()
+        return response
+
+    async def fetch(self) -> list[RawJob]:
+        endpoint = str(self.company.ats_config["listing_endpoint"])
+        response = await self._get(endpoint)
+        jobs: list[RawJob] = []
+        for item in self._listing_items(response.text, endpoint):
+            metadata = {
+                "charter_research": {
+                    "detail_url": item["url"],
+                    "listing_hash": item["listing_hash"],
+                }
+            }
+            _append_raw_job(
+                jobs,
+                "Charter Research",
+                self.company.slug,
+                item,
+                source_company=self.company.slug,
+                external_job_id=item["id"],
+                title=item["title"],
+                location_raw=item["location"],
+                description_raw="",
+                posted_at=None,
+                url=item["url"],
+                metadata=metadata,
+            )
+        return jobs
+
+    async def hydrate(self, raw: RawJob) -> RawJob:
+        charter_data = raw.metadata.get("charter_research", {})
+        detail_url = charter_data.get("detail_url")
+        if not detail_url or charter_data.get("detail_checked"):
+            return raw
+        metadata = dict(raw.metadata)
+        charter_data = dict(charter_data)
+        try:
+            response = await self.client.get(detail_url, timeout=20, follow_redirects=True)
+        except httpx.HTTPError:
+            charter_data["detail_checked"] = True
+            metadata.update({
+                "charter_research": charter_data,
+                "active_status": ActiveStatus.UNKNOWN.value,
+                "active_status_page_checked": True,
+                "active_status_evidence": {},
+            })
+            return raw.model_copy(update={"metadata": metadata})
+
+        if response.status_code in {404, 410}:
+            status = ActiveStatus.INACTIVE
+            body = raw.description_raw
+        elif not response.is_success:
+            status = ActiveStatus.UNKNOWN
+            body = raw.description_raw
+        else:
+            soup = BeautifulSoup(response.text, "html.parser")
+            description = soup.select_one(".job-description, #job-description, [itemprop=description]")
+            if description is None:
+                description = soup.select_one("main") or soup.body or soup
+            body = description.get_text(" ", strip=True)
+            status = page_status(response.text)
+        charter_data.update({"detail_checked": True, "description": body})
+        metadata.update({
+            "charter_research": charter_data,
+            "active_status": status.value,
+            "active_status_page_checked": True,
+            "active_status_evidence": {"official_detail_checked": True},
+        })
+        return raw.model_copy(update={"description_raw": body, "metadata": metadata})
+
+
 class TalentBrewSource(JobSource):
     """Public TalentBrew/Radancy inventory with a configured company facet."""
 
@@ -1864,6 +1978,7 @@ SOURCE_CLASSES: dict[AtsType, type[JobSource]] = {
     AtsType.SUCCESSFACTORS: SuccessFactorsSource,
     AtsType.TEAMTAILOR: TeamtailorSource,
     AtsType.CITY_OF_HOPE: CityOfHopeSource,
+    AtsType.CHARTER_RESEARCH: CharterResearchSource,
     AtsType.TALENTBREW: TalentBrewSource,
 }
 

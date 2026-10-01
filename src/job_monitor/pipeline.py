@@ -495,7 +495,10 @@ async def run_pipeline(
                             )
                         continue
 
-                    if raw.metadata.get("city_of_hope") and hasattr(runner, "hydrate_candidate"):
+                    if (
+                        raw.metadata.get("city_of_hope")
+                        or raw.metadata.get("charter_research")
+                    ) and hasattr(runner, "hydrate_candidate"):
                         preliminary = [
                             match_job(
                                 parsed,

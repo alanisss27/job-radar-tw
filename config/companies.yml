@@ -1,6 +1,17 @@
 # Registry entries are intentionally explicit. `source_verified` means a live API
 # response has been checked, not merely that the company is a desired target.
 companies:
+  - slug: charter-research
+    name: Charter Research
+    careers_url: https://www.charterresearch.com/open-roles/
+    ats_type: charter_research
+    ats_config:
+      listing_endpoint: https://www.charterresearch.com/open-roles/
+    industry: clinical-services
+    profiles: [clinical-discovery]
+    priority: 1
+    enabled: true
+    source_verified: true
   - slug: cognitive-research-corporation
     name: Cognitive Research Corporation (CRC)
     careers_url: https://careers.cogres.com/jobs
