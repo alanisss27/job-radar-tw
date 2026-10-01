@@ -498,6 +498,7 @@ async def run_pipeline(
                     if (
                         raw.metadata.get("city_of_hope")
                         or raw.metadata.get("charter_research")
+                        or raw.metadata.get("oracle")
                     ) and hasattr(runner, "hydrate_candidate"):
                         preliminary = [
                             match_job(
@@ -516,7 +517,7 @@ async def run_pipeline(
                         if potential:
                             raw = await runner.hydrate_candidate(company, raw)
                             parsed = parse_job(raw)
-                            # City of Hope hashes listing fields for stable change detection;
+                            # These sources hash listing fields for stable change detection;
                             # recompute the plan so the hydrated payload is still persisted.
                             plan = (
                                 storage.plan_job_from_index(raw, job_index.get(raw.stable_external_id))

@@ -27,6 +27,7 @@ class AtsType(StrEnum):
     CITY_OF_HOPE = "city_of_hope"
     TALENTBREW = "talentbrew"
     CHARTER_RESEARCH = "charter_research"
+    ORACLE = "oracle"
 
 
 class ProfileName(StrEnum):
@@ -140,6 +141,7 @@ class CompanyConfig(BaseModel):
             AtsType.CITY_OF_HOPE: {"listing_endpoint"},
             AtsType.TALENTBREW: {"listing_endpoint", "company_filter"},
             AtsType.CHARTER_RESEARCH: {"listing_endpoint"},
+            AtsType.ORACLE: {"listing_endpoint", "site_number"},
         }[self.ats_type]
         missing = required - set(self.ats_config)
         if missing:
@@ -221,6 +223,9 @@ class RawJob(BaseModel):
 
     @property
     def content_hash(self) -> str:
+        oracle_data = self.metadata.get("oracle")
+        if isinstance(oracle_data, dict) and oracle_data.get("listing_hash"):
+            return str(oracle_data["listing_hash"])
         city_data = self.metadata.get("city_of_hope")
         if isinstance(city_data, dict) and city_data.get("listing_hash"):
             return str(city_data["listing_hash"])

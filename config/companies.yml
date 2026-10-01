@@ -1,6 +1,18 @@
 # Registry entries are intentionally explicit. `source_verified` means a live API
 # response has been checked, not merely that the company is a desired target.
 companies:
+  - slug: nmdp
+    name: NMDP
+    careers_url: https://hddl.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_2
+    ats_type: oracle
+    ats_config:
+      listing_endpoint: https://hddl.fa.us2.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitions
+      site_number: CX_2
+    industry: biomedical-research
+    profiles: [clinical-discovery]
+    priority: 1
+    enabled: true
+    source_verified: true
   - slug: charter-research
     name: Charter Research
     careers_url: https://www.charterresearch.com/open-roles/

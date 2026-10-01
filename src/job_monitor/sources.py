@@ -1965,7 +1965,143 @@ class TalentBrewSource(JobSource):
         return list(jobs_by_requisition.values())
 
 
+class OracleSource(JobSource):
+    """Candidate Experience inventory; full descriptions only for candidate hydration."""
+
+    def _params(self, offset: int, limit: int) -> dict[str, str]:
+        site = self.company.ats_config["site_number"]
+        return {
+            "onlyData": "true",
+            "expand": "requisitionList.secondaryLocations",
+            "finder": f"findReqs;siteNumber={site},facetsList=NONE,limit={limit},offset={offset}",
+        }
+
+    @staticmethod
+    def _inventory(payload: Any) -> dict:
+        items = payload.get("items") if isinstance(payload, dict) else None
+        if not isinstance(items, list) or len(items) != 1 or not isinstance(items[0], dict):
+            raise SourceError("Oracle: expected one nested inventory object")
+        return items[0]
+
+    def _normalize(self, item: dict) -> RawJob:
+        job_id = str(item.get("Id", ""))
+        if not job_id.isascii() or not job_id.isdigit() or not _usable_text(item.get("Title")):
+            raise SourceError("Oracle: missing numeric requisition ID or title")
+        secondary = item.get("secondaryLocations") or []
+        if not isinstance(secondary, list) or any(not isinstance(x, dict) for x in secondary):
+            raise SourceError("Oracle: malformed secondary locations")
+        primary = item.get("PrimaryLocation") or ""
+        locations = [primary] + [x.get("LocationName") or "" for x in secondary]
+        code = item.get("WorkplaceTypeCode")
+        arrangement = {
+            "ORA_REMOTE": "remote", "ORA_HYBRID": "hybrid", "ORA_ON_SITE": "onsite",
+        }.get(code, item.get("WorkplaceType") or "")
+        endpoint = str(self.company.ats_config["listing_endpoint"])
+        site = self.company.ats_config["site_number"]
+        board = urljoin(endpoint, f"/hcmUI/CandidateExperience/en/sites/{site}")
+        raw = RawJob(
+            source_company=self.company.slug, external_job_id=job_id,
+            title=item["Title"],
+            location_raw="; ".join(dict.fromkeys(x for x in locations if x)),
+            description_raw=_html_text(item.get("ShortDescriptionStr")),
+            posted_at=_parse_datetime(item.get("PostedDate")),
+            url=f"{board}/job/{job_id}",
+            metadata={
+                "oracle": {
+                    "primary_location": primary,
+                    "primary_location_country": item.get("PrimaryLocationCountry"),
+                    "secondary_locations": secondary,
+                    "workplace_type_code": code,
+                    "workplace_type": item.get("WorkplaceType"),
+                },
+                "eligibility": {"work_arrangement": arrangement} if arrangement else {},
+            },
+        )
+        # Match RawJob hashing conventions while retaining secondary-location changes.
+        basis = raw.content_hash + "|" + json.dumps(raw.metadata["oracle"], sort_keys=True)
+        raw.metadata["oracle"]["listing_hash"] = hashlib.sha256(basis.encode()).hexdigest()
+        return raw
+
+    async def fetch(self) -> list[RawJob]:
+        endpoint = str(self.company.ats_config["listing_endpoint"])
+        limit = self.company.ats_config.get("limit", 25)
+        if type(limit) is not int or limit <= 0:
+            raise SourceError("Oracle: page size must be a positive integer")
+        jobs: list[RawJob] = []
+        seen: set[str] = set()
+        offset, expected_total = 0, None
+        for _ in range(1000):
+            inventory = self._inventory(await self.get_json(
+                endpoint, params=self._params(offset, limit)
+            ))
+            page_offset, page_limit, total = (
+                inventory.get(key) for key in ("Offset", "Limit", "TotalJobsCount")
+            )
+            if any(type(x) is not int for x in (page_offset, page_limit, total)):
+                raise SourceError("Oracle: missing or invalid nested pagination metadata")
+            if page_offset != offset or not 0 < page_limit <= limit or total < offset:
+                raise SourceError("Oracle: non-advancing or inconsistent nested pagination")
+            if expected_total is not None and total != expected_total:
+                raise SourceError("Oracle: inventory total changed during pagination")
+            expected_total = total
+            items = inventory.get("requisitionList")
+            if not isinstance(items, list) or any(not isinstance(x, dict) for x in items):
+                raise SourceError("Oracle: missing or invalid requisition list")
+            if not items and offset < total:
+                raise SourceError("Oracle: unexpected empty page before inventory completion")
+            for item in items:
+                raw = self._normalize(item)
+                if raw.stable_external_id in seen:
+                    raise SourceError("Oracle: repeated requisition ID during pagination")
+                seen.add(raw.stable_external_id)
+                jobs.append(raw)
+            if len(items) != min(page_limit, total - offset):
+                raise SourceError("Oracle: page count does not match nested inventory metadata")
+            next_offset = page_offset + page_limit
+            if next_offset >= total:
+                if len(seen) != total:
+                    raise SourceError("Oracle: incomplete inventory")
+                return jobs
+            offset = next_offset
+        raise SourceError("Oracle: pagination exceeded 1000 pages")
+
+    async def hydrate(self, raw: RawJob) -> RawJob:
+        if raw.metadata.get("oracle", {}).get("detail_checked"):
+            return raw
+        endpoint = urljoin(
+            str(self.company.ats_config["listing_endpoint"]), "recruitingCEJobRequisitionDetails"
+        )
+        site = self.company.ats_config["site_number"]
+        payload = await self.get_json(endpoint, params={
+            "onlyData": "true", "expand": "all",
+            "finder": f"ById;Id={raw.stable_external_id},siteNumber={site}",
+        })
+        detail = self._inventory(payload)
+        if str(detail.get("Id")) != raw.stable_external_id:
+            raise SourceError("Oracle: detail identity does not match listing")
+        if not _usable_text(detail.get("ExternalDescriptionStr")):
+            raise SourceError("Oracle: full candidate description is missing")
+        description = "\n".join(
+            _html_text(detail.get(key)) for key in (
+                "ExternalDescriptionStr", "ExternalResponsibilitiesStr",
+                "ExternalQualificationsStr", "OrganizationDescriptionStr", "CorporateDescriptionStr",
+            ) if _usable_text(detail.get(key))
+        )
+        eligibility = {
+            **raw.metadata.get("eligibility", {}),
+            **_eligibility_metadata({"description": description}).get("eligibility", {}),
+        }
+        return raw.model_copy(update={
+            "description_raw": description,
+            "metadata": {
+                **raw.metadata, "eligibility": eligibility,
+                "oracle": {**raw.metadata["oracle"], "detail_checked": True},
+            },
+        })
+
+
 SOURCE_CLASSES: dict[AtsType, type[JobSource]] = {
+    AtsType.ORACLE: OracleSource,
     AtsType.GREENHOUSE: GreenhouseSource,
     AtsType.LEVER: LeverSource,
     AtsType.ASHBY: AshbySource,
