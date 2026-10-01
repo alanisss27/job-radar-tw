@@ -28,6 +28,7 @@ class AtsType(StrEnum):
     TALENTBREW = "talentbrew"
     CHARTER_RESEARCH = "charter_research"
     ORACLE = "oracle"
+    DYNAMICS_ATS = "dynamics_ats"
 
 
 class ProfileName(StrEnum):
@@ -142,6 +143,7 @@ class CompanyConfig(BaseModel):
             AtsType.TALENTBREW: {"listing_endpoint", "company_filter"},
             AtsType.CHARTER_RESEARCH: {"listing_endpoint"},
             AtsType.ORACLE: {"listing_endpoint", "site_number"},
+            AtsType.DYNAMICS_ATS: {"listing_endpoint", "form_id"},
         }[self.ats_type]
         missing = required - set(self.ats_config)
         if missing:

@@ -13,6 +13,7 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
+from uuid import UUID
 
 import httpx
 from bs4 import BeautifulSoup
@@ -28,20 +29,33 @@ logger = logging.getLogger(__name__)
 
 def _eligibility_metadata(item: dict) -> dict:
     """Retain explicit ATS requirement facts otherwise lost during normalization."""
+
     def texts(value):
         if isinstance(value, str):
             return [value]
         if isinstance(value, list):
             return [text for entry in value for text in texts(entry)]
         if isinstance(value, dict):
-            return [text for key in ("name", "value", "text", "content", "addressRegion", "addressCountry")
-                    for text in texts(value.get(key))]
+            return [
+                text
+                for key in ("name", "value", "text", "content", "addressRegion", "addressCountry")
+                for text in texts(value.get(key))
+            ]
         return []
 
     facts = {}
-    credential_evidence = [clause for key in (
-        "content", "descriptionHtml", "descriptionPlain", "description", "jobDescription"
-    ) for text in texts(item.get(key)) for clause in credential_clauses(text)]
+    credential_evidence = [
+        clause
+        for key in (
+            "content",
+            "descriptionHtml",
+            "descriptionPlain",
+            "description",
+            "jobDescription",
+        )
+        for text in texts(item.get(key))
+        for clause in credential_clauses(text)
+    ]
     if credential_evidence:
         facts["requirements"] = list(dict.fromkeys(credential_evidence))
     for target, keys in {
@@ -66,8 +80,9 @@ def _eligibility_metadata(item: dict) -> dict:
             elif name in {"workplace type", "remote type", "work arrangement"} and value:
                 facts["work_arrangement"] = " ".join(value)
     for entry in item.get("lists", []) or []:
-        if isinstance(entry, dict) and any(word in entry.get("text", "").lower()
-                                           for word in ("qualification", "requirement")):
+        if isinstance(entry, dict) and any(
+            word in entry.get("text", "").lower() for word in ("qualification", "requirement")
+        ):
             facts.setdefault("requirements", []).extend(texts(entry.get("content")))
     return {"eligibility": facts} if facts else {}
 
@@ -425,7 +440,7 @@ class SmartRecruitersSource(JobSource):
                         **_eligibility_metadata(detail),
                         "smartrecruiters": {
                             "country_code": str(location.get("country", "")).strip().lower()
-                        }
+                        },
                     },
                 )
             offset += len(content)
@@ -445,14 +460,18 @@ class WorkdaySource(JobSource):
         self.request_controller = request_controller or WorkdayRequestController()
         self.warnings: list[dict[str, str]] = []
 
-    def _record_exclusion(self, item: Mapping[str, Any], title: str, path: str, reason: str) -> None:
-        self.warnings.append({
-            "company": self.company.name,
-            "title": str(title),
-            "location": str(item.get("locationsText") or ""),
-            "reason": reason,
-            "url": self.company.ats_config.get("detail_base_url", "").rstrip("/") + path,
-        })
+    def _record_exclusion(
+        self, item: Mapping[str, Any], title: str, path: str, reason: str
+    ) -> None:
+        self.warnings.append(
+            {
+                "company": self.company.name,
+                "title": str(title),
+                "location": str(item.get("locationsText") or ""),
+                "reason": reason,
+                "url": self.company.ats_config.get("detail_base_url", "").rstrip("/") + path,
+            }
+        )
 
     async def _request(self, method: str, url: str, **kwargs: Any):
         return await self.request_controller.request(self.client, method, url, **kwargs)
@@ -498,8 +517,12 @@ class WorkdaySource(JobSource):
         validate_locations = cfg.get("validate_location_facets", False)
         facet_country = cfg.get("location_facet_country")
         if validate_locations and ("locations" not in patterns or not cfg.get("detail_api_base")):
-            raise SourceError("Workday location validation requires locations pattern and detail API")
-        if facet_country is not None and (not validate_locations or not _usable_text(facet_country)):
+            raise SourceError(
+                "Workday location validation requires locations pattern and detail API"
+            )
+        if facet_country is not None and (
+            not validate_locations or not _usable_text(facet_country)
+        ):
             raise SourceError("Workday location_facet_country requires validated location facets")
         if patterns:
             response = await self._request(
@@ -539,10 +562,12 @@ class WorkdaySource(JobSource):
             collect_facets(payload.get("facets") if isinstance(payload, dict) else None)
             if any(not ids for ids in resolved.values()):
                 raise SourceError("Workday facet patterns resolved no IDs; refusing unscoped fetch")
-            applied_facets.update({
-                resolved_facet_keys.get(key, key): list(dict.fromkeys(ids))
-                for key, ids in resolved.items()
-            })
+            applied_facets.update(
+                {
+                    resolved_facet_keys.get(key, key): list(dict.fromkeys(ids))
+                    for key, ids in resolved.items()
+                }
+            )
         limit = int(cfg.get("limit", 20))
         jobs: list[RawJob] = []
         seen: set[str] = set()
@@ -611,7 +636,9 @@ class WorkdaySource(JobSource):
                                     "detail availability indicates posting is closed or unavailable",
                                 )
                                 continue
-                            apply_action = (detail.get("positionUserActions") or {}).get("applyAction")
+                            apply_action = (detail.get("positionUserActions") or {}).get(
+                                "applyAction"
+                            )
                             active_status_evidence = {
                                 "posted": detail.get("posted"),
                                 "canApply": detail.get("canApply"),
@@ -626,33 +653,45 @@ class WorkdaySource(JobSource):
                                     not _usable_text(primary)
                                     or not isinstance(additional, list)
                                     or any(not _usable_text(value) for value in additional)
-                                    or not any(patterns["locations"].search(value)
-                                               for value in [primary, *additional])
+                                    or not any(
+                                        patterns["locations"].search(value)
+                                        for value in [primary, *additional]
+                                    )
                                 ):
                                     raise WorkdayLocationValidationError(
                                         "Workday detail does not confirm scoped location for "
                                         f"{self.company.slug}{external_path}"
                                     )
-                                scoped_additional = [value for value in additional
-                                                     if patterns["locations"].search(value)]
+                                scoped_additional = [
+                                    value
+                                    for value in additional
+                                    if patterns["locations"].search(value)
+                                ]
                                 primary_country = (detail.get("country") or {}).get("descriptor")
-                                if (facet_country and not scoped_additional
-                                        and primary_country != facet_country):
+                                if (
+                                    facet_country
+                                    and not scoped_additional
+                                    and primary_country != facet_country
+                                ):
                                     raise WorkdayLocationValidationError(
                                         "Workday primary country does not confirm location facet "
                                         f"for {self.company.slug}{external_path}"
                                     )
                                 # Country belongs to the primary location, never to an
                                 # additional location merely selected by a search facet.
-                                location_metadata = {"workday_locations": {
-                                    "primary": primary,
-                                    "additional": additional,
-                                    "primary_country": detail.get("country"),
-                                    "requisition_location": detail.get("jobRequisitionLocation"),
-                                    "listing": item.get("locationsText"),
-                                    "facet_country": facet_country,
-                                    "scoped_additional": scoped_additional,
-                                }}
+                                location_metadata = {
+                                    "workday_locations": {
+                                        "primary": primary,
+                                        "additional": additional,
+                                        "primary_country": detail.get("country"),
+                                        "requisition_location": detail.get(
+                                            "jobRequisitionLocation"
+                                        ),
+                                        "listing": item.get("locationsText"),
+                                        "facet_country": facet_country,
+                                        "scoped_additional": scoped_additional,
+                                    }
+                                }
                                 location_parts = [primary]
                             eligibility_metadata.update(_eligibility_metadata(detail))
                             description = _html_text(detail.get("jobDescription") or description)
@@ -672,10 +711,14 @@ class WorkdaySource(JobSource):
                                 detail_locations = [
                                     primary_country,
                                     (detail.get("jobRequisitionLocation") or {})
-                                    .get("country", {}).get("alpha2Code"),
-                                    *(f"{value}, {facet_country}"
-                                      if facet_country and value in scoped_additional else value
-                                      for value in additional),
+                                    .get("country", {})
+                                    .get("alpha2Code"),
+                                    *(
+                                        f"{value}, {facet_country}"
+                                        if facet_country and value in scoped_additional
+                                        else value
+                                        for value in additional
+                                    ),
                                 ]
                             for location in detail_locations:
                                 if location and location.casefold() not in {
@@ -684,7 +727,12 @@ class WorkdaySource(JobSource):
                                     location_parts.append(location)
                         except WorkdayRequestError as exc:
                             if validate_locations:
-                                self._record_exclusion(item, title, external_path, "detail request failed after retries")
+                                self._record_exclusion(
+                                    item,
+                                    title,
+                                    external_path,
+                                    "detail request failed after retries",
+                                )
                                 logger.error(
                                     "Excluding Workday posting after detail request failure "
                                     "for %s%s: %s",
@@ -701,7 +749,9 @@ class WorkdaySource(JobSource):
                             )
                         except WorkdayLocationValidationError as exc:
                             if validate_locations:
-                                self._record_exclusion(item, title, external_path, "location validation failed")
+                                self._record_exclusion(
+                                    item, title, external_path, "location validation failed"
+                                )
                                 logger.error(
                                     "Excluding Workday posting after location validation failure "
                                     "for %s%s: %s",
@@ -713,7 +763,9 @@ class WorkdaySource(JobSource):
                             raise
                         except httpx.HTTPStatusError as exc:
                             if validate_locations:
-                                self._record_exclusion(item, title, external_path, "detail HTTP failure")
+                                self._record_exclusion(
+                                    item, title, external_path, "detail HTTP failure"
+                                )
                                 logger.error(
                                     "Excluding Workday posting after detail HTTP failure "
                                     "for %s%s: %s",
@@ -730,7 +782,12 @@ class WorkdaySource(JobSource):
                             )
                         except (httpx.HTTPError, ValueError, TypeError, AttributeError) as exc:
                             if validate_locations:
-                                self._record_exclusion(item, title, external_path, "detail evidence malformed or unavailable")
+                                self._record_exclusion(
+                                    item,
+                                    title,
+                                    external_path,
+                                    "detail evidence malformed or unavailable",
+                                )
                                 logger.error(
                                     "Excluding Workday posting after detail validation failure "
                                     "for %s%s: %s",
@@ -876,7 +933,11 @@ class JibeSource(JobSource):
                     },
                 )
             total = payload.get("totalCount") if isinstance(payload, dict) else None
-            if not entries or (isinstance(total, int) and page * limit >= total) or len(entries) < limit:
+            if (
+                not entries
+                or (isinstance(total, int) and page * limit >= total)
+                or len(entries) < limit
+            ):
                 break
             page += 1
         return jobs
@@ -991,7 +1052,9 @@ class EightfoldSource(JobSource):
                 public_url = public_template.format(position_id=key)
                 location_values = item.get("locations")
                 if isinstance(location_values, list):
-                    listing_locations = [str(value) for value in location_values if value is not None]
+                    listing_locations = [
+                        str(value) for value in location_values if value is not None
+                    ]
                 elif location_values is None:
                     listing_locations = []
                 else:
@@ -1008,8 +1071,12 @@ class EightfoldSource(JobSource):
                         detail_endpoint,
                         params={"domain": domain, "position_id": key},
                     )
-                    detail = detail_payload.get("data") if isinstance(detail_payload, dict) else None
-                    if not isinstance(detail, dict) or not _usable_text(detail.get("jobDescription")):
+                    detail = (
+                        detail_payload.get("data") if isinstance(detail_payload, dict) else None
+                    )
+                    if not isinstance(detail, dict) or not _usable_text(
+                        detail.get("jobDescription")
+                    ):
                         raise ValueError("missing detail data or job description")
                 except (httpx.HTTPError, SourceError, TypeError, ValueError) as exc:
                     warning["reason"] = f"detail enrichment failed: {type(exc).__name__}"
@@ -1029,11 +1096,15 @@ class EightfoldSource(JobSource):
                     locations = listing_locations
                 else:
                     locations = [str(detail_locations)]
-                requisition_id = detail.get("atsJobId") or detail.get("displayJobId") or item.get("atsJobId")
+                requisition_id = (
+                    detail.get("atsJobId") or detail.get("displayJobId") or item.get("atsJobId")
+                )
                 work_location = detail.get("workLocationOption") or item.get("workLocationOption")
                 flexibility = detail.get("locationFlexibility") or item.get("locationFlexibility")
                 apply_action = (detail.get("positionUserActions") or {}).get("applyAction")
-                application_url = apply_action.get("applyUrl") if isinstance(apply_action, dict) else None
+                application_url = (
+                    apply_action.get("applyUrl") if isinstance(apply_action, dict) else None
+                )
                 metadata = {
                     "eightfold": {
                         "position_id": detail.get("id", position_id),
@@ -1116,16 +1187,23 @@ class SuccessFactorsSource(JobSource):
                     location = remainder[1]
             else:
                 without_title = row_text.replace(title, "", 1).strip(" |")
-                date_match = re.search(r"\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2},\s+\d{4}\b|\b\d{1,2}/\d{1,2}/\d{2,4}\b", without_title, re.I)
+                date_match = re.search(
+                    r"\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2},\s+\d{4}\b|\b\d{1,2}/\d{1,2}/\d{2,4}\b",
+                    without_title,
+                    re.I,
+                )
                 date_text = date_match.group(0) if date_match else ""
                 location = without_title.replace(date_text, "", 1).strip(" |")
-            found.setdefault(job_id, {
-                "id": job_id,
-                "title": title,
-                "location": location,
-                "posted_at": cls._posted_date(date_text),
-                "url": href,
-            })
+            found.setdefault(
+                job_id,
+                {
+                    "id": job_id,
+                    "title": title,
+                    "location": location,
+                    "posted_at": cls._posted_date(date_text),
+                    "url": href,
+                },
+            )
         return list(found.values())
 
     @staticmethod
@@ -1192,7 +1270,9 @@ class SuccessFactorsSource(JobSource):
             except (httpx.HTTPError, SourceError) as exc:
                 logger.warning(
                     "Skipping unavailable SuccessFactors detail for %s job %s: %s",
-                    self.company.slug, item["id"], exc,
+                    self.company.slug,
+                    item["id"],
+                    exc,
                 )
                 continue
             soup = BeautifulSoup(detail_html, "html.parser")
@@ -1215,7 +1295,10 @@ class SuccessFactorsSource(JobSource):
                     and not target.startswith("#")
                     and urlsplit(href).scheme in {"http", "https"}
                 ):
-                    if anchor.has_attr("disabled") or anchor.get("aria-disabled", "").casefold() == "true":
+                    if (
+                        anchor.has_attr("disabled")
+                        or anchor.get("aria-disabled", "").casefold() == "true"
+                    ):
                         continue
                     apply_url = href
                     break
@@ -1264,10 +1347,20 @@ class TeamtailorSource(JobSource):
             job_id = match.group(1)
             card = anchor.find_parent("li") or anchor.parent
             card_text = card.get_text(" ", strip=True) if card else title
-            remainder = re.sub(re.escape(title), "", card_text, count=1, flags=re.I).strip(" ·|•-\t")
-            parts = [part.strip(" ·|•\t") for part in re.split(r"\s*[·|•]\s*", remainder) if part.strip(" ·|•\t")]
+            remainder = re.sub(re.escape(title), "", card_text, count=1, flags=re.I).strip(
+                " ·|•-\t"
+            )
+            parts = [
+                part.strip(" ·|•\t")
+                for part in re.split(r"\s*[·|•]\s*", remainder)
+                if part.strip(" ·|•\t")
+            ]
             arrangement = next(
-                (part for part in parts if re.fullmatch(r"fully remote|remote|hybrid|on[ -]?site", part, re.I)),
+                (
+                    part
+                    for part in parts
+                    if re.fullmatch(r"fully remote|remote|hybrid|on[ -]?site", part, re.I)
+                ),
                 "",
             )
             department = parts[0] if parts else ""
@@ -1277,14 +1370,17 @@ class TeamtailorSource(JobSource):
                     location = parts[-2]
                 if len(parts) > 2:
                     department = parts[0]
-            items.setdefault(job_id, {
-                "id": job_id,
-                "title": title,
-                "url": detail_url,
-                "department": department,
-                "location": location,
-                "remote_status": arrangement,
-            })
+            items.setdefault(
+                job_id,
+                {
+                    "id": job_id,
+                    "title": title,
+                    "url": detail_url,
+                    "department": department,
+                    "location": location,
+                    "remote_status": arrangement,
+                },
+            )
         return list(items.values())
 
     @staticmethod
@@ -1336,7 +1432,9 @@ class TeamtailorSource(JobSource):
             if button.has_attr("disabled") or button.get("aria-disabled", "").casefold() == "true":
                 return ActiveStatus.INACTIVE, {"disabled_apply_action": True}
             has_form_affordance = bool(
-                soup.select_one("form[action], [data-action*='apply' i], [aria-controls*='application' i], [id*='application' i], [class*='application-form' i]")
+                soup.select_one(
+                    "form[action], [data-action*='apply' i], [aria-controls*='application' i], [id*='application' i], [class*='application-form' i]"
+                )
                 or re.search(r"\bloading application form\b", soup.get_text(" ", strip=True), re.I)
             )
             if has_form_affordance:
@@ -1369,7 +1467,9 @@ class TeamtailorSource(JobSource):
             except (httpx.HTTPError, SourceError) as exc:
                 logger.warning(
                     "Skipping unavailable Teamtailor detail for %s job %s: %s",
-                    self.company.slug, item["id"], exc,
+                    self.company.slug,
+                    item["id"],
+                    exc,
                 )
                 continue
             soup = BeautifulSoup(detail_html, "html.parser")
@@ -1394,7 +1494,8 @@ class TeamtailorSource(JobSource):
                 "active_status_page_checked": True,
                 "active_status_evidence": apply_evidence,
                 "eligibility": {"work_arrangement": item["remote_status"]}
-                if item["remote_status"] else {},
+                if item["remote_status"]
+                else {},
             }
             _append_raw_job(
                 jobs,
@@ -1404,7 +1505,9 @@ class TeamtailorSource(JobSource):
                 source_company=self.company.slug,
                 external_job_id=item["id"],
                 title=title or item["title"],
-                location_raw="; ".join(value for value in (item["location"], item["remote_status"]) if value),
+                location_raw="; ".join(
+                    value for value in (item["location"], item["remote_status"]) if value
+                ),
                 description_raw=description,
                 posted_at=None,
                 url=item["url"],
@@ -1461,17 +1564,26 @@ class CityOfHopeSource(JobSource):
             if not location:
                 location_match = re.search(
                     r"(?:Location|Locations)\s*:?\s*(.*?)(?=\s+(?:Category|Job Category|Job Type|Shift|Pay Range|Job Ref|Description)\s*:?|$)",
-                    text, re.I,
+                    text,
+                    re.I,
                 )
                 location = location_match.group(1).strip(" |·") if location_match else ""
             remote = bool(cls._remote.search(text))
             if remote:
                 location = re.sub(cls._remote, "United States", location or text).strip()
+
             def field(*labels: str) -> str:
-                pattern = r"(?:" + "|".join(labels) + r")\s*:?\s*(.*?)(?=\s+(?:Category|Job Category|Job Type|Shift|Pay Range|Compensation|Job Ref|Location|Description)\s*:?|$)"
+                pattern = (
+                    r"(?:"
+                    + "|".join(labels)
+                    + r")\s*:?\s*(.*?)(?=\s+(?:Category|Job Category|Job Type|Shift|Pay Range|Compensation|Job Ref|Location|Description)\s*:?|$)"
+                )
                 match = re.search(pattern, text, re.I)
                 return match.group(1).strip(" |·") if match else ""
-            excerpt_node = card.select_one(".job-description, .job-excerpt, [class*=description i], p")
+
+            excerpt_node = card.select_one(
+                ".job-description, .job-excerpt, [class*=description i], p"
+            )
             excerpt = excerpt_node.get_text(" ", strip=True) if excerpt_node else text
             category = field("Category", "Job Category")
             job_type = field("Job Type", "Employment Type")
@@ -1481,18 +1593,33 @@ class CityOfHopeSource(JobSource):
                 text,
                 re.I,
             )
-            pay = pay_match.group(0).strip() if pay_match else field(
-                "Pay Range", "Compensation", "Hourly Pay"
+            pay = (
+                pay_match.group(0).strip()
+                if pay_match
+                else field("Pay Range", "Compensation", "Hourly Pay")
             )
             listing_hash = hashlib.sha256(
-                "|".join((title, job_ref, location, category, job_type, shift, pay, excerpt)).encode()
+                "|".join(
+                    (title, job_ref, location, category, job_type, shift, pay, excerpt)
+                ).encode()
             ).hexdigest()
-            items.setdefault(job_id, {
-                "id": job_id, "job_ref": job_ref, "title": title, "url": detail_url,
-                "location": location, "remote": remote, "category": category,
-                "job_type": job_type, "shift": shift, "pay_range": pay,
-                "excerpt": excerpt, "listing_hash": listing_hash,
-            })
+            items.setdefault(
+                job_id,
+                {
+                    "id": job_id,
+                    "job_ref": job_ref,
+                    "title": title,
+                    "url": detail_url,
+                    "location": location,
+                    "remote": remote,
+                    "category": category,
+                    "job_type": job_type,
+                    "shift": shift,
+                    "pay_range": pay,
+                    "excerpt": excerpt,
+                    "listing_hash": listing_hash,
+                },
+            )
         return list(items.values())
 
     @staticmethod
@@ -1530,19 +1657,32 @@ class CityOfHopeSource(JobSource):
                 remote_evidence = "United States (This is a remote job)" if item["remote"] else ""
                 metadata = {
                     "city_of_hope": {
-                        "job_ref": item["job_ref"], "detail_url": item["url"],
-                        "category": item["category"], "job_type": item["job_type"],
-                        "shift": item["shift"], "pay_range": item["pay_range"],
-                        "listing_excerpt": item["excerpt"], "listing_hash": item["listing_hash"],
+                        "job_ref": item["job_ref"],
+                        "detail_url": item["url"],
+                        "category": item["category"],
+                        "job_type": item["job_type"],
+                        "shift": item["shift"],
+                        "pay_range": item["pay_range"],
+                        "listing_excerpt": item["excerpt"],
+                        "listing_hash": item["listing_hash"],
                         "remote_status": "remote" if item["remote"] else "",
                     },
                     "eligibility": {"work_arrangement": "remote"} if item["remote"] else {},
                 }
-                _append_raw_job(jobs, "City of Hope", self.company.slug, item,
-                    source_company=self.company.slug, external_job_id=item["id"],
+                _append_raw_job(
+                    jobs,
+                    "City of Hope",
+                    self.company.slug,
+                    item,
+                    source_company=self.company.slug,
+                    external_job_id=item["id"],
                     title=item["title"],
                     location_raw="; ".join(x for x in (item["location"], remote_evidence) if x),
-                    description_raw=item["excerpt"], posted_at=None, url=item["url"], metadata=metadata)
+                    description_raw=item["excerpt"],
+                    posted_at=None,
+                    url=item["url"],
+                    metadata=metadata,
+                )
             if len(items) < 20:
                 break
         return jobs
@@ -1577,13 +1717,17 @@ class CityOfHopeSource(JobSource):
         body = description.get_text(" ", strip=True)
         status = page_status(response.text)
         city_data.update({"detail_checked": True, "description": body})
-        metadata.update({
-            "city_of_hope": city_data,
-            "active_status": status.value,
-            "active_status_page_checked": True,
-            "active_status_evidence": {"official_detail_checked": True},
-        })
-        return raw.model_copy(update={"description_raw": body or raw.description_raw, "metadata": metadata})
+        metadata.update(
+            {
+                "city_of_hope": city_data,
+                "active_status": status.value,
+                "active_status_page_checked": True,
+                "active_status_evidence": {"official_detail_checked": True},
+            }
+        )
+        return raw.model_copy(
+            update={"description_raw": body or raw.description_raw, "metadata": metadata}
+        )
 
 
 class CharterResearchSource(JobSource):
@@ -1614,10 +1758,16 @@ class CharterResearchSource(JobSource):
             listing_hash = hashlib.sha256(
                 "|".join((job_id, title, location, detail_url)).encode()
             ).hexdigest()
-            jobs.setdefault(job_id, {
-                "id": job_id, "title": title, "location": location,
-                "url": detail_url, "listing_hash": listing_hash,
-            })
+            jobs.setdefault(
+                job_id,
+                {
+                    "id": job_id,
+                    "title": title,
+                    "location": location,
+                    "url": detail_url,
+                    "listing_hash": listing_hash,
+                },
+            )
         return list(jobs.values())
 
     @retry(
@@ -1669,12 +1819,14 @@ class CharterResearchSource(JobSource):
             response = await self.client.get(detail_url, timeout=20, follow_redirects=True)
         except httpx.HTTPError:
             charter_data["detail_checked"] = True
-            metadata.update({
-                "charter_research": charter_data,
-                "active_status": ActiveStatus.UNKNOWN.value,
-                "active_status_page_checked": True,
-                "active_status_evidence": {},
-            })
+            metadata.update(
+                {
+                    "charter_research": charter_data,
+                    "active_status": ActiveStatus.UNKNOWN.value,
+                    "active_status_page_checked": True,
+                    "active_status_evidence": {},
+                }
+            )
             return raw.model_copy(update={"metadata": metadata})
 
         if response.status_code in {404, 410}:
@@ -1685,18 +1837,22 @@ class CharterResearchSource(JobSource):
             body = raw.description_raw
         else:
             soup = BeautifulSoup(response.text, "html.parser")
-            description = soup.select_one(".job-description, #job-description, [itemprop=description]")
+            description = soup.select_one(
+                ".job-description, #job-description, [itemprop=description]"
+            )
             if description is None:
                 description = soup.select_one("main") or soup.body or soup
             body = description.get_text(" ", strip=True)
             status = page_status(response.text)
         charter_data.update({"detail_checked": True, "description": body})
-        metadata.update({
-            "charter_research": charter_data,
-            "active_status": status.value,
-            "active_status_page_checked": True,
-            "active_status_evidence": {"official_detail_checked": True},
-        })
+        metadata.update(
+            {
+                "charter_research": charter_data,
+                "active_status": status.value,
+                "active_status_page_checked": True,
+                "active_status_evidence": {"official_detail_checked": True},
+            }
+        )
         return raw.model_copy(update={"description_raw": body, "metadata": metadata})
 
 
@@ -1704,10 +1860,18 @@ class TalentBrewSource(JobSource):
     """Public TalentBrew/Radancy inventory with a configured company facet."""
 
     _job_path = re.compile(r"/job/[^?#]+", re.I)
-    _req = re.compile(r"\b(?:requisition|job\s*(?:id|reference|ref)|req(?:uisition)?\s*(?:id|number|#)?)\s*[:#]?\s*(R-?\d{5,}|\d{5,})\b", re.I)
+    _req = re.compile(
+        r"\b(?:requisition|job\s*(?:id|reference|ref)|req(?:uisition)?\s*(?:id|number|#)?)\s*[:#]?\s*(R-?\d{5,}|\d{5,})\b",
+        re.I,
+    )
     _date_formats = (
-        "%m/%d/%Y", "%m/%d/%y", "%b %d, %Y", "%B %d, %Y", "%Y-%m-%d",
-        "%d %b %Y", "%d %B %Y",
+        "%m/%d/%Y",
+        "%m/%d/%y",
+        "%b %d, %Y",
+        "%B %d, %Y",
+        "%Y-%m-%d",
+        "%d %b %Y",
+        "%d %B %Y",
     )
 
     @classmethod
@@ -1774,18 +1938,34 @@ class TalentBrewSource(JobSource):
             location_node = card.select_one("[class*=location i], [data-location], .job-location")
             location = location_node.get_text(" ", strip=True) if location_node else ""
             if not location:
-                match = re.search(r"\bLocation\s*:?\s*(.*?)(?=\s+(?:Company|Category|Date Posted|Requisition|Job ID)\s*:?|$)", text, re.I)
+                match = re.search(
+                    r"\bLocation\s*:?\s*(.*?)(?=\s+(?:Company|Category|Date Posted|Requisition|Job ID)\s*:?|$)",
+                    text,
+                    re.I,
+                )
                 location = match.group(1).strip() if match else ""
-            posted_match = re.search(r"(?:Date Posted|Posted)\s*:?\s*([^|·]+?)(?=\s+(?:Closing Date|Company|Category|Location)\s*:?|$)", text, re.I)
+            posted_match = re.search(
+                r"(?:Date Posted|Posted)\s*:?\s*([^|·]+?)(?=\s+(?:Closing Date|Company|Category|Location)\s*:?|$)",
+                text,
+                re.I,
+            )
             category_node = card.select_one("[class*=category i], [class*=department i]")
             category = category_node.get_text(" ", strip=True) if category_node else ""
             arrangement = cls._arrangement(location)
-            found.setdefault(requisition, {
-                "id": requisition, "title": title, "url": url, "location": location,
-                "company": company or company_name, "category": category,
-                "posted_at": cls._parse_date(posted_match.group(1) if posted_match else None),
-                "arrangement": arrangement, "listing_text": text,
-            })
+            found.setdefault(
+                requisition,
+                {
+                    "id": requisition,
+                    "title": title,
+                    "url": url,
+                    "location": location,
+                    "company": company or company_name,
+                    "category": category,
+                    "posted_at": cls._parse_date(posted_match.group(1) if posted_match else None),
+                    "arrangement": arrangement,
+                    "listing_text": text,
+                },
+            )
         return list(found.values())
 
     @staticmethod
@@ -1806,8 +1986,10 @@ class TalentBrewSource(JobSource):
         return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), ""))
 
     @retry(
-        stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=8),
-        retry=retry_if_exception_type(httpx.HTTPError), reraise=True,
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=8),
+        retry=retry_if_exception_type(httpx.HTTPError),
+        reraise=True,
     )
     async def _get(self, url: str) -> str:
         response = await self.client.get(url, timeout=20, follow_redirects=True)
@@ -1826,14 +2008,24 @@ class TalentBrewSource(JobSource):
             requisition = "R-" + requisition.removeprefix("R")
         canonical = soup.select_one("link[rel=canonical][href]")
         url = urljoin(detail_url, canonical.get("href")) if canonical else detail_url
-        description_node = soup.select_one("[itemprop=description], .job-description, #job-description, .job-details")
+        description_node = soup.select_one(
+            "[itemprop=description], .job-description, #job-description, .job-details"
+        )
         if description_node is None:
             description_node = soup.select_one("main") or soup.body or soup
-        location_node = soup.select_one("[itemprop=jobLocation], [class*=location i], [data-location]")
+        location_node = soup.select_one(
+            "[itemprop=jobLocation], [class*=location i], [data-location]"
+        )
         location = location_node.get_text(" ", strip=True) if location_node else ""
+
         def labeled(label: str) -> str:
-            match = re.search(rf"\b{label}\s*:?\s*(.*?)(?=\s+(?:Date Posted|Closing Date|Location|Company|Category|Requisition|Job ID|Salary|Compensation)\s*:?|$)", text, re.I)
+            match = re.search(
+                rf"\b{label}\s*:?\s*(.*?)(?=\s+(?:Date Posted|Closing Date|Location|Company|Category|Requisition|Job ID|Salary|Compensation)\s*:?|$)",
+                text,
+                re.I,
+            )
             return match.group(1).strip() if match else ""
+
         posted = TalentBrewSource._parse_date(
             labeled("Date Posted") or labeled("Posting Date") or labeled("Posted")
         )
@@ -1848,7 +2040,9 @@ class TalentBrewSource(JobSource):
         arrangement = TalentBrewSource._arrangement(location)
         apply_action = None
         for node in soup.select("a[href], button, input[type=submit]"):
-            label = " ".join((node.get_text(" ", strip=True), node.get("aria-label", ""), node.get("value", ""))).strip()
+            label = " ".join(
+                (node.get_text(" ", strip=True), node.get("aria-label", ""), node.get("value", ""))
+            ).strip()
             if re.fullmatch(r"apply(?: now)?", label, re.I):
                 href = node.get("href", "").strip()
                 if href and href != "#" and not href.casefold().startswith("javascript:"):
@@ -1867,11 +2061,18 @@ class TalentBrewSource(JobSource):
         else:
             status = ActiveStatus.UNKNOWN
         return {
-            "title": title, "requisition_id": requisition, "url": url,
-            "location": location, "company": company, "category": category,
+            "title": title,
+            "requisition_id": requisition,
+            "url": url,
+            "location": location,
+            "company": company,
+            "category": category,
             "description": description_node.get_text(" ", strip=True),
-            "posted_at": posted, "closing_date": closing, "salary": salary,
-            "arrangement": arrangement, "apply_action": apply_action,
+            "posted_at": posted,
+            "closing_date": closing,
+            "salary": salary,
+            "arrangement": arrangement,
+            "apply_action": apply_action,
             "active_status": status,
         }
 
@@ -1910,7 +2111,9 @@ class TalentBrewSource(JobSource):
             seen_detail_urls.add(row["url"])
             try:
                 detail = await self._get(row["url"])
-                fields = self._detail_fields(detail, row["url"], str(config.get("brand_label", self.company.name)))
+                fields = self._detail_fields(
+                    detail, row["url"], str(config.get("brand_label", self.company.name))
+                )
                 detail_url = fields["url"]
                 title = fields["title"] or row["title"]
                 external_id = fields["requisition_id"] or row["id"]
@@ -1922,47 +2125,146 @@ class TalentBrewSource(JobSource):
                         "requisition_id": external_id,
                         "company": fields["company"] or row["company"],
                         "category": fields["category"] or row["category"],
-                        "closing_date": fields["closing_date"].isoformat() if fields["closing_date"] else None,
-                        "salary": fields["salary"], "apply_url": fields["apply_action"],
+                        "closing_date": fields["closing_date"].isoformat()
+                        if fields["closing_date"]
+                        else None,
+                        "salary": fields["salary"],
+                        "apply_url": fields["apply_action"],
                         "work_arrangement": arrangement,
                     },
                     "active_status": status.value,
                     "active_status_page_checked": True,
                     "active_status_evidence": {"apply_url": fields["apply_action"]}
-                    if fields["apply_action"] and status is ActiveStatus.ACTIVE else {},
+                    if fields["apply_action"] and status is ActiveStatus.ACTIVE
+                    else {},
                     "eligibility": {"work_arrangement": arrangement} if arrangement else {},
                 }
                 normalized: list[RawJob] = []
-                _append_raw_job(normalized, "TalentBrew", self.company.slug, row,
-                    source_company=self.company.slug, external_job_id=external_id,
-                    title=title, location_raw=location,
+                _append_raw_job(
+                    normalized,
+                    "TalentBrew",
+                    self.company.slug,
+                    row,
+                    source_company=self.company.slug,
+                    external_job_id=external_id,
+                    title=title,
+                    location_raw=location,
                     description_raw=fields["description"] or row["listing_text"],
-                    posted_at=fields["posted_at"] or row["posted_at"], url=detail_url, metadata=metadata)
+                    posted_at=fields["posted_at"] or row["posted_at"],
+                    url=detail_url,
+                    metadata=metadata,
+                )
                 if normalized:
                     jobs_by_requisition.setdefault(external_id, normalized[0])
             except (httpx.HTTPError, SourceError) as exc:
-                logger.warning("Unavailable TalentBrew detail for %s %s: %s", self.company.slug, row["id"], exc)
+                logger.warning(
+                    "Unavailable TalentBrew detail for %s %s: %s", self.company.slug, row["id"], exc
+                )
                 external_id = row["id"]
                 metadata = {
                     "talentbrew": {
-                        "requisition_id": external_id, "company": row["company"],
-                        "category": row["category"], "work_arrangement": row["arrangement"],
+                        "requisition_id": external_id,
+                        "company": row["company"],
+                        "category": row["category"],
+                        "work_arrangement": row["arrangement"],
                     },
                     "active_status": ActiveStatus.UNKNOWN.value,
                     "active_status_page_checked": True,
                     "active_status_evidence": {},
                     "eligibility": {"work_arrangement": row["arrangement"]}
-                    if row["arrangement"] else {},
+                    if row["arrangement"]
+                    else {},
                 }
                 fallback: list[RawJob] = []
-                _append_raw_job(fallback, "TalentBrew", self.company.slug, row,
-                    source_company=self.company.slug, external_job_id=external_id,
-                    title=row["title"], location_raw=row["location"],
-                    description_raw=row["listing_text"], posted_at=row["posted_at"],
-                    url=row["url"], metadata=metadata)
+                _append_raw_job(
+                    fallback,
+                    "TalentBrew",
+                    self.company.slug,
+                    row,
+                    source_company=self.company.slug,
+                    external_job_id=external_id,
+                    title=row["title"],
+                    location_raw=row["location"],
+                    description_raw=row["listing_text"],
+                    posted_at=row["posted_at"],
+                    url=row["url"],
+                    metadata=metadata,
+                )
                 if fallback:
                     jobs_by_requisition.setdefault(external_id, fallback[0])
         return list(jobs_by_requisition.values())
+
+
+class DynamicsAtsSource(JobSource):
+    """Complete Dynamics ATS feed; the public board paginates locally."""
+
+    async def fetch(self) -> list[RawJob]:
+        endpoint = str(self.company.ats_config["listing_endpoint"])
+        form_id = str(self.company.ats_config["form_id"])
+        response = await self.client.post(endpoint, data={"formId": form_id})
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict) or payload.get("Errors") or payload.get("ErrorMessage"):
+            raise SourceError("Dynamics ATS: invalid or unsuccessful inventory response")
+        items, total = payload.get("Data"), payload.get("Total")
+        if not isinstance(items, list) or type(total) is not int or total < 0:
+            raise SourceError("Dynamics ATS: missing inventory data or total")
+        if len(items) != total:
+            raise SourceError("Dynamics ATS: incomplete inventory; Data count differs from Total")
+        jobs: list[RawJob] = []
+        seen: set[str] = set()
+        for item in items:
+            if not isinstance(item, dict):
+                raise SourceError("Dynamics ATS: malformed posting")
+            try:
+                job_id = str(UUID(str(item.get("Id"))))
+            except ValueError as exc:
+                raise SourceError("Dynamics ATS: missing or invalid posting ID") from exc
+            if job_id in seen:
+                raise SourceError("Dynamics ATS: repeated posting ID")
+            seen.add(job_id)
+            title, description = item.get("name"), item.get("description")
+            if not _usable_text(title) or not _usable_text(description):
+                raise SourceError("Dynamics ATS: missing title or full description")
+            title, description = _html_text(title), _html_text(description)
+            if not title or not description:
+                raise SourceError("Dynamics ATS: empty title or full description")
+            detail_url = urljoin(endpoint, f"/JobListing/Details/{form_id}/{job_id}")
+            if not _usable_text(item.get("JobUrl")) or item["JobUrl"].rstrip("/") != detail_url:
+                raise SourceError("Dynamics ATS: detail URL does not match source and posting ID")
+            locations = []
+            for key in ("dcrs_location", "dcrs_city", "dcrs_state", "dcrs_country"):
+                value = item.get(key)
+                if value is not None and not isinstance(value, str):
+                    raise SourceError("Dynamics ATS: malformed location")
+                value = (value or "").strip()
+                if value and value.casefold() not in {"n/a", "na"}:
+                    locations.append(value)
+            jobs.append(
+                RawJob(
+                    source_company=self.company.slug,
+                    external_job_id=job_id,
+                    title=title,
+                    location_raw="; ".join(dict.fromkeys(locations)),
+                    description_raw=description,
+                    url=detail_url,
+                    metadata={
+                        "dynamics_ats": {
+                            key: item.get(key)
+                            for key in (
+                                "dcrs_category",
+                                "dcrs_type",
+                                "dcrs_location",
+                                "dcrs_city",
+                                "dcrs_state",
+                                "dcrs_country",
+                            )
+                        },
+                        **_eligibility_metadata(item),
+                    },
+                )
+            )
+        return jobs
 
 
 class OracleSource(JobSource):
@@ -1994,13 +2296,16 @@ class OracleSource(JobSource):
         locations = [primary] + [x.get("LocationName") or "" for x in secondary]
         code = item.get("WorkplaceTypeCode")
         arrangement = {
-            "ORA_REMOTE": "remote", "ORA_HYBRID": "hybrid", "ORA_ON_SITE": "onsite",
+            "ORA_REMOTE": "remote",
+            "ORA_HYBRID": "hybrid",
+            "ORA_ON_SITE": "onsite",
         }.get(code, item.get("WorkplaceType") or "")
         endpoint = str(self.company.ats_config["listing_endpoint"])
         site = self.company.ats_config["site_number"]
         board = urljoin(endpoint, f"/hcmUI/CandidateExperience/en/sites/{site}")
         raw = RawJob(
-            source_company=self.company.slug, external_job_id=job_id,
+            source_company=self.company.slug,
+            external_job_id=job_id,
             title=item["Title"],
             location_raw="; ".join(dict.fromkeys(x for x in locations if x)),
             description_raw=_html_text(item.get("ShortDescriptionStr")),
@@ -2031,9 +2336,9 @@ class OracleSource(JobSource):
         seen: set[str] = set()
         offset, expected_total = 0, None
         for _ in range(1000):
-            inventory = self._inventory(await self.get_json(
-                endpoint, params=self._params(offset, limit)
-            ))
+            inventory = self._inventory(
+                await self.get_json(endpoint, params=self._params(offset, limit))
+            )
             page_offset, page_limit, total = (
                 inventory.get(key) for key in ("Offset", "Limit", "TotalJobsCount")
             )
@@ -2072,35 +2377,48 @@ class OracleSource(JobSource):
             str(self.company.ats_config["listing_endpoint"]), "recruitingCEJobRequisitionDetails"
         )
         site = self.company.ats_config["site_number"]
-        payload = await self.get_json(endpoint, params={
-            "onlyData": "true", "expand": "all",
-            "finder": f"ById;Id={raw.stable_external_id},siteNumber={site}",
-        })
+        payload = await self.get_json(
+            endpoint,
+            params={
+                "onlyData": "true",
+                "expand": "all",
+                "finder": f"ById;Id={raw.stable_external_id},siteNumber={site}",
+            },
+        )
         detail = self._inventory(payload)
         if str(detail.get("Id")) != raw.stable_external_id:
             raise SourceError("Oracle: detail identity does not match listing")
         if not _usable_text(detail.get("ExternalDescriptionStr")):
             raise SourceError("Oracle: full candidate description is missing")
         description = "\n".join(
-            _html_text(detail.get(key)) for key in (
-                "ExternalDescriptionStr", "ExternalResponsibilitiesStr",
-                "ExternalQualificationsStr", "OrganizationDescriptionStr", "CorporateDescriptionStr",
-            ) if _usable_text(detail.get(key))
+            _html_text(detail.get(key))
+            for key in (
+                "ExternalDescriptionStr",
+                "ExternalResponsibilitiesStr",
+                "ExternalQualificationsStr",
+                "OrganizationDescriptionStr",
+                "CorporateDescriptionStr",
+            )
+            if _usable_text(detail.get(key))
         )
         eligibility = {
             **raw.metadata.get("eligibility", {}),
             **_eligibility_metadata({"description": description}).get("eligibility", {}),
         }
-        return raw.model_copy(update={
-            "description_raw": description,
-            "metadata": {
-                **raw.metadata, "eligibility": eligibility,
-                "oracle": {**raw.metadata["oracle"], "detail_checked": True},
-            },
-        })
+        return raw.model_copy(
+            update={
+                "description_raw": description,
+                "metadata": {
+                    **raw.metadata,
+                    "eligibility": eligibility,
+                    "oracle": {**raw.metadata["oracle"], "detail_checked": True},
+                },
+            }
+        )
 
 
 SOURCE_CLASSES: dict[AtsType, type[JobSource]] = {
+    AtsType.DYNAMICS_ATS: DynamicsAtsSource,
     AtsType.ORACLE: OracleSource,
     AtsType.GREENHOUSE: GreenhouseSource,
     AtsType.LEVER: LeverSource,
@@ -2126,7 +2444,9 @@ class SourceRunner:
         self.domain_locks: dict[str, asyncio.Lock] = {}
         self.workday_controller = WorkdayRequestController()
 
-    async def fetch_with_warnings(self, company: CompanyConfig) -> tuple[list[RawJob], list[dict[str, str]]]:
+    async def fetch_with_warnings(
+        self, company: CompanyConfig
+    ) -> tuple[list[RawJob], list[dict[str, str]]]:
         domain = httpx.URL(str(company.careers_url)).host or company.slug
         lock = self.domain_locks.setdefault(domain, asyncio.Lock())
         async with self.semaphore, lock:

@@ -1,6 +1,18 @@
 # Registry entries are intentionally explicit. `source_verified` means a live API
 # response has been checked, not merely that the company is a desired target.
 companies:
+  - slug: kps-life
+    name: KPS Life
+    careers_url: https://kpslife.com/careers/
+    ats_type: dynamics_ats
+    ats_config:
+      listing_endpoint: https://portal.dynamicsats.com/JobListing/WebForm/JobListing_Read
+      form_id: fda69be2-506b-4fd5-b160-1590844cee6f
+    industry: clinical-services
+    profiles: [clinical-discovery]
+    priority: 1
+    enabled: true
+    source_verified: true
   - slug: nmdp
     name: NMDP
     careers_url: https://hddl.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_2
