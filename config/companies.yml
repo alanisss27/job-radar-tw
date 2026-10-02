@@ -61,6 +61,17 @@ companies:
     priority: 1
     enabled: true
     source_verified: true
+  - slug: emerald-clinical
+    name: Emerald Clinical
+    careers_url: https://careers.emeraldclinical.com/jobs
+    ats_type: teamtailor
+    ats_config:
+      listing_endpoint: https://careers.emeraldclinical.com/jobs
+    industry: clinical-services
+    profiles: [clinical-discovery]
+    priority: 1
+    enabled: true
+    source_verified: true
   - slug: city-of-hope
     name: City of Hope
     careers_url: https://www.cityofhopejobs.org/jobs/

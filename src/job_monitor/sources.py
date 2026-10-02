@@ -1615,50 +1615,57 @@ class TeamtailorSource(JobSource):
     @classmethod
     def _listing_items(cls, content: str, base_url: str) -> list[dict[str, Any]]:
         soup = BeautifulSoup(content, "html.parser")
+        templates = soup.select("turbo-stream template")
+        listing_soups = (
+            [BeautifulSoup(template.decode_contents(), "html.parser") for template in templates]
+            if templates
+            else [soup]
+        )
         items: dict[str, dict[str, Any]] = {}
-        for anchor in soup.select("a[href]"):
-            detail_url = urljoin(base_url, anchor["href"])
-            match = cls._job_path.search(urlsplit(detail_url).path)
-            title = anchor.get_text(" ", strip=True)
-            if not match or not title:
-                continue
-            job_id = match.group(1)
-            card = anchor.find_parent("li") or anchor.parent
-            card_text = card.get_text(" ", strip=True) if card else title
-            remainder = re.sub(re.escape(title), "", card_text, count=1, flags=re.I).strip(
-                " ·|•-\t"
-            )
-            parts = [
-                part.strip(" ·|•\t")
-                for part in re.split(r"\s*[·|•]\s*", remainder)
-                if part.strip(" ·|•\t")
-            ]
-            arrangement = next(
-                (
-                    part
-                    for part in parts
-                    if re.fullmatch(r"fully remote|remote|hybrid|on[ -]?site", part, re.I)
-                ),
-                "",
-            )
-            department = parts[0] if parts else ""
-            location = parts[1] if len(parts) > 1 else ""
-            if arrangement and parts and parts[-1].casefold() == arrangement.casefold():
-                if len(parts) > 2:
-                    location = parts[-2]
-                if len(parts) > 2:
-                    department = parts[0]
-            items.setdefault(
-                job_id,
-                {
-                    "id": job_id,
-                    "title": title,
-                    "url": detail_url,
-                    "department": department,
-                    "location": location,
-                    "remote_status": arrangement,
-                },
-            )
+        for listing_soup in listing_soups:
+            for anchor in listing_soup.select("a[href]"):
+                detail_url = urljoin(base_url, anchor["href"])
+                match = cls._job_path.search(urlsplit(detail_url).path)
+                title = anchor.get_text(" ", strip=True)
+                if not match or not title:
+                    continue
+                job_id = match.group(1)
+                card = anchor.find_parent("li") or anchor.parent
+                card_text = card.get_text(" ", strip=True) if card else title
+                remainder = re.sub(re.escape(title), "", card_text, count=1, flags=re.I).strip(
+                    " ·|•-\t"
+                )
+                parts = [
+                    part.strip(" ·|•\t")
+                    for part in re.split(r"\s*[·|•]\s*", remainder)
+                    if part.strip(" ·|•\t")
+                ]
+                arrangement = next(
+                    (
+                        part
+                        for part in parts
+                        if re.fullmatch(r"fully remote|remote|hybrid|on[ -]?site", part, re.I)
+                    ),
+                    "",
+                )
+                department = parts[0] if parts else ""
+                location = parts[1] if len(parts) > 1 else ""
+                if arrangement and parts and parts[-1].casefold() == arrangement.casefold():
+                    if len(parts) > 2:
+                        location = parts[-2]
+                    if len(parts) > 2:
+                        department = parts[0]
+                items.setdefault(
+                    job_id,
+                    {
+                        "id": job_id,
+                        "title": title,
+                        "url": detail_url,
+                        "department": department,
+                        "location": location,
+                        "remote_status": arrangement,
+                    },
+                )
         return list(items.values())
 
     @staticmethod
@@ -1666,9 +1673,12 @@ class TeamtailorSource(JobSource):
         soup = BeautifulSoup(content, "html.parser")
         for anchor in soup.select("a[rel~='next'][href], a[href]"):
             label = anchor.get_text(" ", strip=True).casefold()
-            if "next" not in label and "next" not in anchor.get("rel", []):
+            href = anchor["href"]
+            path = urlsplit(urljoin(current_url, href)).path
+            show_more = bool(re.search(r"/jobs/show[_-]?more/?$", path, re.I))
+            if "next" not in label and "next" not in anchor.get("rel", []) and not show_more:
                 continue
-            candidate = urljoin(current_url, anchor["href"])
+            candidate = urljoin(current_url, href)
             return candidate
         return None
 

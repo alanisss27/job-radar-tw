@@ -17,6 +17,11 @@ COMPANY = next(
     for company in load_companies(Path("config/companies.yml"))
     if company.slug == "cognitive-research-corporation"
 )
+EMERALD = next(
+    company
+    for company in load_companies(Path("config/companies.yml"))
+    if company.slug == "emerald-clinical"
+)
 LISTING = "https://careers.cogres.com/jobs"
 REMOTE_URL = "https://careers.cogres.com/jobs/705280-senior-clinical-project-manager"
 
@@ -86,6 +91,50 @@ async def test_teamtailor_repeated_next_link_fails_visibly():
     async with httpx.AsyncClient() as client:
         with pytest.raises(SourceError, match="pagination cycle"):
             await TeamtailorSource(COMPANY, client).fetch()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_teamtailor_turbo_stream_show_more_paginates_to_terminal_page():
+    page2 = f"{LISTING}/show_more?page=2"
+    page3 = f"{LISTING}/show_more?page=3"
+    first = respx.get(LISTING).respond(
+        200,
+        text="""<ul><li><a href="/jobs/800000-first-role">First Role</a>
+          <span>Clinical Operations · Boston · Hybrid</span></li></ul>
+          <a href="/jobs/show_more?page=2">Show 20 more</a>""",
+    )
+    second = respx.get(page2).respond(
+        200,
+        text="""<turbo-stream action="append"><template><li>
+          <a href="/jobs/800001-second-role">Second Role</a>
+          <div><span>Data Science</span><span>·</span><span>United States</span>
+          <span>·</span><span>Fully Remote</span></div>
+          </li></template></turbo-stream>
+          <turbo-stream action="append"><template>
+          <a href="/jobs/show_more?page=3">Show 20 more</a>
+          </template></turbo-stream>""",
+    )
+    third = respx.get(page3).respond(
+        200,
+        text="""<turbo-stream action="append"><template><li>
+          <a href="/jobs/800002-third-role">Third Role</a>
+          <div><span>Clinical Operations</span><span>·</span><span>Multiple locations</span>
+          <span>·</span><span>Onsite</span></div>
+          </li></template></turbo-stream>""",
+    )
+    details = respx.get(url__regex=r"https://careers\.cogres\.com/jobs/80000[0-2]-.*")
+    async with httpx.AsyncClient() as client:
+        jobs = await TeamtailorSource(COMPANY, client).fetch()
+
+    assert first.called and second.called and third.called
+    assert not details.called
+    assert [job.external_job_id for job in jobs] == ["800000", "800001", "800002"]
+    assert jobs[1].metadata["teamtailor"]["department"] == "Data Science"
+    assert jobs[1].location_raw == "United States; Fully Remote"
+    assert parse_job(jobs[1]).remote_type is RemoteType.REMOTE
+    assert jobs[2].location_raw == "Multiple locations; Onsite"
+    assert parse_job(jobs[2]).remote_type is RemoteType.ONSITE
 
 
 @pytest.mark.asyncio
@@ -172,3 +221,6 @@ def test_teamtailor_config_is_strict_and_registered():
     assert COMPANY.ats_type is AtsType.TEAMTAILOR
     assert COMPANY.profiles == ["clinical-discovery"]
     assert SOURCE_CLASSES[AtsType.TEAMTAILOR] is TeamtailorSource
+    assert EMERALD.ats_type is AtsType.TEAMTAILOR
+    assert EMERALD.enabled is True
+    assert EMERALD.ats_config["listing_endpoint"] == "https://careers.emeraldclinical.com/jobs"
