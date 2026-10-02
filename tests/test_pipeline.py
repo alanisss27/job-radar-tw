@@ -4,7 +4,7 @@ import pytest
 
 from job_monitor import pipeline
 from job_monitor.config import ProfileConfig, SearchPreferences, Settings
-from job_monitor.models import CompanyConfig, RawJob
+from job_monitor.models import CompanyConfig, MatchedJob, MatchResult, RawJob
 from job_monitor.storage import JobPersistResult, JobPlan, RunClaim, Storage
 
 
@@ -99,6 +99,44 @@ class FakeStorage:
 
     def finish_run(self, run_id, stats, errors):
         self.finished = (run_id, stats, errors)
+
+
+def test_batch_bookkeeping_uses_reconciled_persistence_result():
+    first_seen_at = datetime(2026, 1, 1, tzinfo=UTC)
+
+    class ReconciledStorage:
+        def persist_job_decisions_batch(self, company_id, run_id, items):
+            return [JobPersistResult("job-1", False, False, first_seen_at, 0)]
+
+    raw = RawJob(
+        source_company="acme",
+        external_job_id="job-1",
+        title="Data Analyst",
+        location_raw="Phoenix, AZ",
+        description_raw="SQL",
+        url="https://example.com/jobs/1",
+    )
+    stale_plan = JobPlan("job-1", True, True, datetime(2026, 6, 1, tzinfo=UTC), None)
+    matched = MatchedJob(
+        "Acme",
+        pipeline.parse_job(raw),
+        MatchResult(profile="tech", score=0.9, eligible=True, tier="strong"),
+        stale_plan.first_seen_at,
+        True,
+        True,
+    )
+    report = pipeline.RunReport("test")
+    batch = pipeline.CompanyBatchPersistence(
+        ReconciledStorage(), "company", "run", "acme", 1, report
+    )
+    batch.add(raw, stale_plan, [], [matched])
+    batch.flush()
+
+    assert (report.jobs_new, report.jobs_changed) == (0, 0)
+    assert (batch.jobs_new, batch.jobs_changed, batch.jobs_unchanged) == (0, 0, 1)
+    reconciled_match = report.matched_jobs[0]
+    assert (reconciled_match.is_new, reconciled_match.changed) == (False, False)
+    assert reconciled_match.first_seen_at == first_seen_at
 
 
 class FakeNotifier:

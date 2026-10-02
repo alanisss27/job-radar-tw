@@ -513,7 +513,9 @@ def test_batched_persistence_matches_single_job_rows_and_counters(tmp_path):
     assert snapshots[0] == snapshots[1]
 
 
-def test_batched_snapshot_mismatch_falls_back_to_single_job_persistence(tmp_path, monkeypatch):
+def test_batched_snapshot_mismatch_replans_new_job_and_suppresses_stale_notification(
+    tmp_path, monkeypatch
+):
     db = Storage(f"sqlite:///{tmp_path / 'test.db'}", create_schema=True)
     company_id = db.sync_company(company())
     run_id = db.start_run("batch")
@@ -522,7 +524,7 @@ def test_batched_snapshot_mismatch_falls_back_to_single_job_persistence(tmp_path
 
     item = raw_job("raced")
     stale_plan = db.plan_job(company_id, item)
-    db.upsert_job(company_id, racing_run_id, item)
+    existing_job_id = db.upsert_job(company_id, racing_run_id, item)[0]
 
     fallback_calls = []
     original_persist = db.persist_job_decisions
@@ -532,9 +534,62 @@ def test_batched_snapshot_mismatch_falls_back_to_single_job_persistence(tmp_path
         return original_persist(*args, **kwargs)
 
     monkeypatch.setattr(db, "persist_job_decisions", fallback)
-    with pytest.raises(RuntimeError, match="job changed while its match decision"):
-        db.persist_job_decisions_batch(company_id, run_id, [(item, stale_plan, [])])
+    decisions = [
+        MatchDecision(
+            "1",
+            MatchResult(profile="tech", score=0.9, eligible=True, tier="strong"),
+            "notification prepared while new",
+        )
+    ]
+    result = db.persist_job_decisions_batch(company_id, run_id, [(item, stale_plan, decisions)])[0]
+
     assert fallback_calls == [True]
+    assert result.job_id == existing_job_id
+    assert (result.is_new, result.changed, result.notifications_enqueued) == (False, False, 0)
+    assert len(db.prefetch_job_index(company_id)) == 1
+    with db.engine.connect() as conn:
+        assert conn.execute(select(func.count()).select_from(match_results)).scalar_one() == 1
+        assert conn.execute(select(func.count()).select_from(notification_outbox)).scalar_one() == 0
+
+
+def test_batched_snapshot_mismatch_replans_changed_job_without_duplicate_version(tmp_path):
+    db = Storage(f"sqlite:///{tmp_path / 'test.db'}", create_schema=True)
+    company_id = db.sync_company(company())
+    run_id = db.start_run("batch")
+    racing_run_id = db.start_run("racing")
+    assert run_id and racing_run_id
+
+    original = raw_job("raced", "original")
+    db.upsert_job(company_id, racing_run_id, original)
+    candidate = raw_job("raced", "candidate")
+    stale_plan = db.plan_job(company_id, candidate)
+    intervening = raw_job("raced", "intervening")
+    db.upsert_job(company_id, racing_run_id, intervening)
+
+    result = db.persist_job_decisions_batch(
+        company_id,
+        run_id,
+        [(candidate, stale_plan, match_decisions())],
+    )[0]
+
+    assert result.is_new is False and result.changed is True
+    assert result.job_id == stale_plan.job_id
+    with db.engine.connect() as conn:
+        saved = conn.execute(
+            select(jobs.c.content_hash).where(jobs.c.id == result.job_id)
+        ).scalar_one()
+        assert saved == candidate.content_hash
+        assert (
+            conn.execute(
+                select(func.count())
+                .select_from(job_versions)
+                .where(
+                    job_versions.c.job_id == result.job_id,
+                    job_versions.c.content_hash == candidate.content_hash,
+                )
+            ).scalar_one()
+            == 1
+        )
 
 
 def test_batched_persistence_sql_scales_by_chunk(tmp_path):

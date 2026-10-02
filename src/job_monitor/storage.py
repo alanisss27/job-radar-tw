@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import uuid
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
@@ -279,6 +279,10 @@ class JobPersistResult:
     changed: bool
     first_seen_at: datetime
     notifications_enqueued: int
+
+
+class JobPlanSnapshotMismatch(RuntimeError):
+    """The persisted job no longer matches the plan prepared for it."""
 
 
 class Storage:
@@ -835,16 +839,54 @@ class Storage:
     ) -> None:
         if plan.is_new:
             if row is not None or plan.previous_content_hash is not None:
-                raise RuntimeError("job changed while its match decision was prepared")
+                raise JobPlanSnapshotMismatch("job changed while its match decision was prepared")
             return
         if (
             row is None
             or row["id"] != plan.job_id
             or row["content_hash"] != plan.previous_content_hash
         ):
-            raise RuntimeError("job changed while its match decision was prepared")
+            raise JobPlanSnapshotMismatch("job changed while its match decision was prepared")
         if plan.changed != (row["content_hash"] != raw.content_hash):
-            raise RuntimeError("job change state no longer matches its prepared decision")
+            raise JobPlanSnapshotMismatch(
+                "job change state no longer matches its prepared decision"
+            )
+
+    def _persist_job_decisions_after_snapshot_mismatch(
+        self,
+        company_id: str,
+        run_id: str,
+        raw: RawJob,
+        prepared_plan: JobPlan,
+        decisions: list[MatchDecision],
+    ) -> JobPersistResult:
+        for attempt in range(3):
+            plan = self.plan_job(company_id, raw)
+            notification_context_changed = any(
+                getattr(plan, field) != getattr(prepared_plan, field)
+                for field in ("job_id", "is_new", "changed", "first_seen_at")
+            )
+            reconciled_decisions = (
+                [replace(decision, notification_message=None) for decision in decisions]
+                if notification_context_changed
+                else decisions
+            )
+            try:
+                return self.persist_job_decisions(
+                    company_id,
+                    run_id,
+                    raw,
+                    plan,
+                    reconciled_decisions,
+                )
+            except JobPlanSnapshotMismatch:
+                if attempt == 2:
+                    raise
+                logger.warning(
+                    "Retrying single-job persistence for %s after another snapshot mismatch",
+                    raw.stable_external_id,
+                )
+        raise AssertionError("unreachable persistence retry state")
 
     def persist_job_decisions(
         self,
@@ -1021,7 +1063,7 @@ class Storage:
                         raw,
                         rows_by_external_id.get(raw.stable_external_id),
                     )
-                except RuntimeError:
+                except JobPlanSnapshotMismatch:
                     fallback.append(index)
                     logger.warning(
                         "Falling back to single-job persistence for %s after snapshot mismatch",
@@ -1278,7 +1320,7 @@ class Storage:
 
         for index in fallback:
             raw, plan, decisions = items[index]
-            results[index] = self.persist_job_decisions(
+            results[index] = self._persist_job_decisions_after_snapshot_mismatch(
                 company_id,
                 run_id,
                 raw,

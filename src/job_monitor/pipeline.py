@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from time import perf_counter
 
@@ -122,21 +122,31 @@ class CompanyBatchPersistence:
             self.run_id,
             self.items,
         )
-        for (_, plan, _), result, eligible_matches in zip(
+        for (_, _plan, _), result, eligible_matches in zip(
             self.items,
             persisted,
             self.eligible_matches,
             strict=True,
         ):
             self.report.immediate_candidates += result.notifications_enqueued
-            self.report.jobs_new += int(plan.is_new)
-            self.report.jobs_changed += int(plan.changed and not plan.is_new)
+            self.report.jobs_new += int(result.is_new)
+            self.report.jobs_changed += int(result.changed and not result.is_new)
             self.report.matches += sum(m.result.notification_eligible for m in eligible_matches)
-            self.report.eligibility_reviews += sum(m.result.needs_eligibility_review for m in eligible_matches)
-            self.report.matched_jobs.extend(eligible_matches)
-            self.jobs_new += int(plan.is_new)
-            self.jobs_changed += int(plan.changed and not plan.is_new)
-            self.jobs_unchanged += int(not plan.changed)
+            self.report.eligibility_reviews += sum(
+                m.result.needs_eligibility_review for m in eligible_matches
+            )
+            self.report.matched_jobs.extend(
+                replace(
+                    match,
+                    first_seen_at=result.first_seen_at,
+                    is_new=result.is_new,
+                    changed=result.changed,
+                )
+                for match in eligible_matches
+            )
+            self.jobs_new += int(result.is_new)
+            self.jobs_changed += int(result.changed and not result.is_new)
+            self.jobs_unchanged += int(not result.changed)
         self.persisted_jobs += len(persisted)
         if self.persisted_jobs % PERSIST_PROGRESS_INTERVAL == 0 or (
             self.persisted_jobs == self.jobs_fetched

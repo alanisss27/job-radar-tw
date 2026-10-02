@@ -6,7 +6,14 @@ from sqlalchemy import event, insert, select, update
 from job_monitor import pipeline
 from job_monitor.config import ProfileConfig, SearchPreferences, Settings
 from job_monitor.models import MatchResult
-from job_monitor.storage import MatchDecision, Storage, jobs, match_results, notification_outbox
+from job_monitor.storage import (
+    JobPlanSnapshotMismatch,
+    MatchDecision,
+    Storage,
+    jobs,
+    match_results,
+    notification_outbox,
+)
 from test_storage import company, raw, raw_job, semantic_snapshot
 
 
@@ -359,7 +366,7 @@ def test_batch_fallback_reconciles_existing_match(store, monkeypatch):
     def mismatch_once(*args):
         calls.append(True)
         if len(calls) == 1:
-            raise RuntimeError("snapshot mismatch")
+            raise JobPlanSnapshotMismatch("snapshot mismatch")
         return validate(*args)
 
     monkeypatch.setattr(db, "_validate_job_plan", mismatch_once)
