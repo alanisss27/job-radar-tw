@@ -1301,8 +1301,15 @@ class PhenomSource(JobSource):
                     raise SourceError(f"Phenom listing {identifier} has no location data")
                 posted = item.get("postedDate")
                 slug = re.sub(r"[^a-z0-9]+", "-", str(title).casefold()).strip("-")
-                detail_url = urljoin(
-                    base, f"/us/en/job/{quote(str(job_id), safe='')}/{quote(slug, safe='-')}"
+                search_path = urlsplit(base).path
+                locale_prefix, separator, _ = search_path.rpartition("search-results")
+                if not separator:
+                    raise SourceError("Phenom listing endpoint has no search-results route")
+                detail_path = (
+                    f"{locale_prefix}job/{quote(str(job_id), safe='')}/{quote(slug, safe='-')}"
+                )
+                detail_url = urlunsplit(
+                    (urlsplit(base).scheme, urlsplit(base).netloc, detail_path, "", "")
                 )
                 metadata = {
                     "job_id": str(job_id),

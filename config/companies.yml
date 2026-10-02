@@ -276,6 +276,17 @@ companies:
     priority: 1
     enabled: true
     source_verified: true
+  - slug: eli-lilly
+    name: Eli Lilly
+    careers_url: https://careers.lilly.com/us/en/
+    ats_type: phenom
+    ats_config:
+      listing_endpoint: https://careers.lilly.com/us/en/search-results/
+    industry: pharmaceutical
+    profiles: [clinical-discovery]
+    priority: 1
+    enabled: true
+    source_verified: true
   - slug: johnson-johnson
     name: Johnson & Johnson (J&J)
     careers_url: https://www.careers.jnj.com/en

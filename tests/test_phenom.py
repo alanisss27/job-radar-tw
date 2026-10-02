@@ -14,6 +14,12 @@ COMPANY = next(
     company for company in load_companies(Path("config/companies.yml")) if company.slug == "merck"
 )
 LISTING = "https://jobs.merck.com/us/en/search-results/"
+LILLY = next(
+    company
+    for company in load_companies(Path("config/companies.yml"))
+    if company.slug == "eli-lilly"
+)
+LILLY_LISTING = "https://careers.lilly.com/us/en/search-results/"
 
 
 def item(seq: str = "MERCUSR1ENUS", job_id: str = "R1", **values):
@@ -34,9 +40,9 @@ def item(seq: str = "MERCUSR1ENUS", job_id: str = "R1", **values):
     }
 
 
-def page(items, total, next_offset=None):
+def page(items, total, next_offset=None, listing=LISTING):
     next_link = (
-        f'<link rel="next" href="{LISTING}?from={next_offset}&amp;s=1">'
+        f'<link rel="next" href="{listing}?from={next_offset}&amp;s=1">'
         if next_offset is not None
         else ""
     )
@@ -156,3 +162,25 @@ def test_phenom_is_registered_and_enabled():
     assert COMPANY.enabled is True
     assert COMPANY.ats_type is AtsType.PHENOM
     assert SOURCE_CLASSES[AtsType.PHENOM] is PhenomSource
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_lilly_phenom_payload_and_offset_pagination_need_no_inventory_details():
+    first = item(
+        "LILLYUS1ENUS", "R-1001", title="Research Scientist", location="Indianapolis, Indiana"
+    )
+    first_route = respx.get(LILLY_LISTING + "?s=1").respond(
+        200, text=page([first], 11, 10, LILLY_LISTING)
+    )
+    next_route = respx.get(LILLY_LISTING + "?from=10&s=1").respond(
+        200, text=page([item("LILLYUS2ENUS", "R-1002")], 11, listing=LILLY_LISTING)
+    )
+    async with httpx.AsyncClient() as client:
+        jobs = await PhenomSource(LILLY, client).fetch()
+
+    assert first_route.called and next_route.called
+    assert len(respx.calls) == 2
+    assert [job.external_job_id for job in jobs] == ["LILLYUS1ENUS", "LILLYUS2ENUS"]
+    assert str(jobs[0].url) == ("https://careers.lilly.com/us/en/job/R-1001/research-scientist")
+    assert jobs[0].metadata["phenom"]["job_id"] == "R-1001"
