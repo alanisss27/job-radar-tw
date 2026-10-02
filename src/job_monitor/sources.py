@@ -1669,9 +1669,18 @@ class TeamtailorSource(JobSource):
             if "next" not in label and "next" not in anchor.get("rel", []):
                 continue
             candidate = urljoin(current_url, anchor["href"])
-            if candidate != current_url:
-                return candidate
+            return candidate
         return None
+
+    @staticmethod
+    def _page_key(url: str) -> tuple[str, str, str, tuple[tuple[str, str], ...]]:
+        parts = urlsplit(url)
+        return (
+            parts.scheme.casefold(),
+            parts.netloc.casefold(),
+            parts.path,
+            tuple(sorted(parse_qsl(parts.query, keep_blank_values=True))),
+        )
 
     @retry(
         stop=stop_after_attempt(3),
@@ -1724,53 +1733,50 @@ class TeamtailorSource(JobSource):
     async def fetch(self) -> list[RawJob]:
         first_page = str(self.company.ats_config["listing_endpoint"])
         pending = [first_page]
-        visited_pages: set[str] = set()
+        visited_pages: set[tuple[str, str, str, tuple[tuple[str, str], ...]]] = set()
         listings: dict[str, dict[str, Any]] = {}
         while pending:
             page_url = pending.pop(0)
-            if page_url in visited_pages:
-                continue
-            visited_pages.add(page_url)
+            page_key = self._page_key(page_url)
+            if page_key in visited_pages:
+                raise SourceError(f"Teamtailor pagination repeated page {page_url}")
+            visited_pages.add(page_key)
             page = await self._get_html(page_url)
             for item in self._listing_items(page, page_url):
                 listings.setdefault(item["id"], item)
             next_url = self._next_listing_url(page, page_url)
-            if next_url and next_url not in visited_pages:
+            if next_url:
+                next_key = self._page_key(next_url)
+                if next_key in visited_pages:
+                    raise SourceError(f"Teamtailor pagination cycle from {page_url} to {next_url}")
                 pending.append(next_url)
 
         jobs: list[RawJob] = []
         for item in listings.values():
-            try:
-                detail_html = await self._get_html(item["url"])
-            except (httpx.HTTPError, SourceError) as exc:
-                logger.warning(
-                    "Skipping unavailable Teamtailor detail for %s job %s: %s",
-                    self.company.slug,
-                    item["id"],
-                    exc,
-                )
-                continue
-            soup = BeautifulSoup(detail_html, "html.parser")
-            title_node = soup.select_one("h1")
-            title = title_node.get_text(" ", strip=True) if title_node else item["title"]
-            description_node = soup.select_one(
-                "[data-job-description], #job-description, .job-description, .prose"
-            ) or soup.select_one("main")
-            if description_node is None:
-                description_node = soup.body or soup
-            description = description_node.get_text(" ", strip=True)
-            status, apply_evidence = self._apply_evidence(detail_html, item["url"])
-            department = item["department"]
+            listing_hash = hashlib.sha256(
+                "|".join(
+                    (
+                        item["id"],
+                        item["title"],
+                        item["location"],
+                        item["department"],
+                        item["remote_status"],
+                        item["url"],
+                    )
+                ).encode()
+            ).hexdigest()
             metadata = {
                 "teamtailor": {
                     "job_id": item["id"],
-                    "department": department,
+                    "department": item["department"],
                     "remote_status": item["remote_status"],
-                    **apply_evidence,
+                    "detail_url": item["url"],
+                    "detail_checked": False,
+                    "listing_hash": listing_hash,
                 },
-                "active_status": status.value,
-                "active_status_page_checked": True,
-                "active_status_evidence": apply_evidence,
+                "active_status": ActiveStatus.UNKNOWN.value,
+                "active_status_page_checked": False,
+                "active_status_evidence": {},
                 "eligibility": {"work_arrangement": item["remote_status"]}
                 if item["remote_status"]
                 else {},
@@ -1782,16 +1788,46 @@ class TeamtailorSource(JobSource):
                 item,
                 source_company=self.company.slug,
                 external_job_id=item["id"],
-                title=title or item["title"],
+                title=item["title"],
                 location_raw="; ".join(
                     value for value in (item["location"], item["remote_status"]) if value
                 ),
-                description_raw=description,
+                description_raw="",
                 posted_at=None,
                 url=item["url"],
                 metadata=metadata,
             )
         return jobs
+
+    async def hydrate(self, raw: RawJob) -> RawJob:
+        teamtailor = raw.metadata.get("teamtailor", {})
+        detail_url = teamtailor.get("detail_url")
+        if not detail_url or teamtailor.get("detail_checked"):
+            return raw
+
+        detail_html = await self._get_html(detail_url)
+        soup = BeautifulSoup(detail_html, "html.parser")
+        title_node = soup.select_one("h1")
+        title = title_node.get_text(" ", strip=True) if title_node else raw.title
+        description_node = soup.select_one(
+            "[data-job-description], #job-description, .job-description, .prose"
+        ) or soup.select_one("main")
+        if description_node is None:
+            description_node = soup.body or soup
+        description = description_node.get_text(" ", strip=True)
+        status, apply_evidence = self._apply_evidence(detail_html, detail_url)
+        metadata = dict(raw.metadata)
+        metadata["teamtailor"] = {**teamtailor, "detail_checked": True, **apply_evidence}
+        metadata["active_status"] = status.value
+        metadata["active_status_page_checked"] = True
+        metadata["active_status_evidence"] = apply_evidence
+        return raw.model_copy(
+            update={
+                "title": title or raw.title,
+                "description_raw": description,
+                "metadata": metadata,
+            }
+        )
 
 
 class CityOfHopeSource(JobSource):

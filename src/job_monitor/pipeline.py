@@ -510,6 +510,7 @@ async def run_pipeline(
                         or raw.metadata.get("charter_research")
                         or raw.metadata.get("oracle")
                         or raw.metadata.get("jobadder_widget")
+                        or raw.metadata.get("teamtailor")
                     ) and hasattr(runner, "hydrate_candidate"):
                         preliminary = [
                             match_job(

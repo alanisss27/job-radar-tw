@@ -246,6 +246,9 @@ class RawJob(BaseModel):
         charter_data = self.metadata.get("charter_research")
         if isinstance(charter_data, dict) and charter_data.get("listing_hash"):
             return str(charter_data["listing_hash"])
+        teamtailor_data = self.metadata.get("teamtailor")
+        if isinstance(teamtailor_data, dict) and teamtailor_data.get("listing_hash"):
+            return str(teamtailor_data["listing_hash"])
         normalized = "|".join(
             [
                 self.title.strip(),
