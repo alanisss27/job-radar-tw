@@ -265,6 +265,17 @@ companies:
     priority: 1
     enabled: true
     source_verified: true
+  - slug: merck
+    name: Merck
+    careers_url: https://jobs.merck.com/us/en/
+    ats_type: phenom
+    ats_config:
+      listing_endpoint: https://jobs.merck.com/us/en/search-results/
+    industry: pharmaceutical
+    profiles: [clinical-discovery]
+    priority: 1
+    enabled: true
+    source_verified: true
   - slug: johnson-johnson
     name: Johnson & Johnson (J&J)
     careers_url: https://www.careers.jnj.com/en

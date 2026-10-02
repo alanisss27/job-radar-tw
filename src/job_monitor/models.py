@@ -23,6 +23,7 @@ class AtsType(StrEnum):
     JSONLD = "jsonld"
     EIGHTFOLD = "eightfold"
     SUCCESSFACTORS = "successfactors"
+    PHENOM = "phenom"
     TEAMTAILOR = "teamtailor"
     CITY_OF_HOPE = "city_of_hope"
     TALENTBREW = "talentbrew"
@@ -139,6 +140,7 @@ class CompanyConfig(BaseModel):
                 "public_job_url_template",
             },
             AtsType.SUCCESSFACTORS: {"search_endpoint"},
+            AtsType.PHENOM: {"listing_endpoint"},
             AtsType.TEAMTAILOR: {"listing_endpoint"},
             AtsType.CITY_OF_HOPE: {"listing_endpoint"},
             AtsType.TALENTBREW: {"listing_endpoint", "company_filter"},

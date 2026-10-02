@@ -12,7 +12,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
-from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, quote, urlencode, urljoin, urlsplit, urlunsplit
 from uuid import UUID
 
 import httpx
@@ -1144,6 +1144,277 @@ class EightfoldSource(JobSource):
             elif len(positions) < limit:
                 break
         return jobs
+
+
+class PhenomSource(JobSource):
+    """Phenom server-rendered inventory with candidate-only job-page hydration."""
+
+    page_size = 10
+    payload_marker = "phApp.ddo ="
+
+    @classmethod
+    def _embedded_payload(cls, html: str) -> dict[str, Any]:
+        start = html.find(cls.payload_marker)
+        if start < 0:
+            raise SourceError("Phenom page is missing embedded phApp.ddo data")
+        start = html.find("{", start + len(cls.payload_marker))
+        if start < 0:
+            raise SourceError("Phenom page has malformed embedded phApp.ddo data")
+        depth = 0
+        in_string = False
+        escaped = False
+        for index in range(start, len(html)):
+            char = html[index]
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == '"':
+                    in_string = False
+                continue
+            if char == '"':
+                in_string = True
+            elif char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        payload = json.loads(html[start : index + 1])
+                    except json.JSONDecodeError as exc:
+                        raise SourceError("Phenom embedded payload is invalid JSON") from exc
+                    if not isinstance(payload, dict):
+                        break
+                    return payload
+        raise SourceError("Phenom embedded phApp.ddo data is incomplete")
+
+    @staticmethod
+    def _locations(item: dict[str, Any]) -> list[str]:
+        locations: list[str] = []
+        multiple = item.get("multi_location")
+        if isinstance(multiple, list):
+            locations.extend(str(value).strip() for value in multiple if value)
+        structured = item.get("multi_location_array")
+        if isinstance(structured, list):
+            locations.extend(
+                str(value["location"]).strip()
+                for value in structured
+                if isinstance(value, dict) and value.get("location")
+            )
+        if not locations:
+            for key in ("location", "cityStateCountry", "cityState", "city"):
+                value = item.get(key)
+                if value and str(value).strip() not in locations:
+                    locations.append(str(value).strip())
+        return list(dict.fromkeys(locations))
+
+    @staticmethod
+    def _page_url(base: str, offset: int) -> str:
+        parts = urlsplit(base)
+        query = [(key, value) for key, value in parse_qsl(parts.query) if key not in {"from", "s"}]
+        if offset:
+            query.append(("from", str(offset)))
+        query.append(("s", "1"))
+        return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), ""))
+
+    @staticmethod
+    def _next_link(html: str, current_url: str) -> str | None:
+        link = BeautifulSoup(html, "html.parser").find("link", rel="next")
+        if not link or not link.get("href"):
+            return None
+        target = urljoin(current_url, str(link["href"]))
+        current = urlsplit(current_url)
+        parsed = urlsplit(target)
+        if (parsed.scheme, parsed.netloc, parsed.path) != (
+            current.scheme,
+            current.netloc,
+            current.path,
+        ):
+            raise SourceError("Phenom pagination link left the configured search endpoint")
+        return target
+
+    @staticmethod
+    def _next_offset(next_url: str) -> int:
+        values = dict(parse_qsl(urlsplit(next_url).query))
+        try:
+            offset = int(values["from"])
+        except (KeyError, ValueError) as exc:
+            raise SourceError("Phenom next link has no valid offset") from exc
+        return offset
+
+    async def fetch(self) -> list[RawJob]:
+        base = str(self.company.ats_config["listing_endpoint"])
+        jobs: list[RawJob] = []
+        seen_ids: set[str] = set()
+        seen_urls: set[str] = set()
+        offset = 0
+        while True:
+            url = self._page_url(base, offset)
+            if url in seen_urls:
+                raise SourceError(f"Phenom pagination repeated offset/page: {offset}")
+            seen_urls.add(url)
+            response = await self.client.get(url, timeout=30, follow_redirects=True)
+            response.raise_for_status()
+            payload = self._embedded_payload(response.text).get("eagerLoadRefineSearch")
+            if not isinstance(payload, dict) or payload.get("status") != 200:
+                raise SourceError(
+                    f"Phenom page at offset {offset} has no successful search payload"
+                )
+            entries = (
+                payload.get("data", {}).get("jobs")
+                if isinstance(payload.get("data"), dict)
+                else None
+            )
+            hits, total = payload.get("hits"), payload.get("totalHits")
+            if (
+                not isinstance(entries, list)
+                or not isinstance(hits, int)
+                or hits < 0
+                or hits != len(entries)
+                or hits > self.page_size
+                or not isinstance(total, int)
+                or total < 0
+            ):
+                raise SourceError(f"Phenom page at offset {offset} has malformed pagination data")
+            next_url = self._next_link(response.text, str(response.url))
+            for item in entries:
+                if not isinstance(item, dict):
+                    raise SourceError(f"Phenom page at offset {offset} contains a malformed job")
+                identifier = item.get("jobSeqNo")
+                job_id = item.get("jobId") or item.get("reqId")
+                title = item.get("title")
+                if (
+                    not _usable_text(identifier)
+                    or not _usable_text(job_id)
+                    or not _usable_text(title)
+                ):
+                    raise SourceError(
+                        f"Phenom page at offset {offset} has a job missing its stable ID"
+                    )
+                identifier = str(identifier)
+                if identifier in seen_ids:
+                    raise SourceError(f"Phenom pagination returned duplicate jobSeqNo {identifier}")
+                seen_ids.add(identifier)
+                locations = self._locations(item)
+                if not locations:
+                    raise SourceError(f"Phenom listing {identifier} has no location data")
+                posted = item.get("postedDate")
+                slug = re.sub(r"[^a-z0-9]+", "-", str(title).casefold()).strip("-")
+                detail_url = urljoin(
+                    base, f"/us/en/job/{quote(str(job_id), safe='')}/{quote(slug, safe='-')}"
+                )
+                metadata = {
+                    "job_id": str(job_id),
+                    "req_id": str(item.get("reqId") or ""),
+                    "job_seq_no": identifier,
+                    "date_created": item.get("dateCreated"),
+                    "category": item.get("category"),
+                    "type": item.get("type"),
+                    "description_teaser": item.get("descriptionTeaser"),
+                    "locations": locations,
+                    "multi_location": item.get("multi_location"),
+                    "multi_location_array": item.get("multi_location_array"),
+                    "total_hits": total,
+                    "page_offset": offset,
+                    "detail_url": detail_url,
+                }
+                _append_raw_job(
+                    jobs,
+                    "Phenom",
+                    self.company.slug,
+                    item,
+                    source_company=self.company.slug,
+                    external_job_id=identifier,
+                    title=str(title).strip(),
+                    location_raw="; ".join(locations),
+                    description_raw=str(item.get("descriptionTeaser") or ""),
+                    posted_at=_parse_datetime(posted),
+                    url=detail_url,
+                    metadata={"phenom": metadata},
+                )
+            if not next_url:
+                if hits == self.page_size and offset + hits < total:
+                    raise SourceError(
+                        f"Phenom pagination ended at offset {offset} before reported total {total}"
+                    )
+                break
+            next_offset = self._next_offset(next_url)
+            if next_offset != offset + self.page_size:
+                raise SourceError(
+                    f"Phenom pagination stalled or skipped from offset {offset} to {next_offset}"
+                )
+            if hits == 0:
+                raise SourceError("Phenom returned a next page after an empty page")
+            offset = next_offset
+        return jobs
+
+    async def hydrate(self, raw: RawJob) -> RawJob:
+        phenom = raw.metadata.get("phenom", {})
+        detail_url = phenom.get("detail_url")
+        if not detail_url or phenom.get("detail_checked"):
+            return raw
+        response = await self.client.get(detail_url, timeout=30, follow_redirects=True)
+        response.raise_for_status()
+        ddo = self._embedded_payload(response.text)
+        detail = ddo.get("jobDetail", {}).get("data", {}).get("job", {})
+        if not isinstance(detail, dict):
+            detail = {}
+        description = next(
+            (
+                detail.get(key)
+                for key in ("jobDescription", "description", "descriptionHtml")
+                if _usable_text(detail.get(key))
+            ),
+            None,
+        )
+        soup = BeautifulSoup(response.text, "html.parser")
+        if not description:
+            for selector in (
+                "[data-ph-at-id='jobdescription-text']",
+                ".job-description",
+                "[itemprop='description']",
+            ):
+                node = soup.select_one(selector)
+                if node:
+                    description = str(node)
+                    break
+        text = soup.get_text(" ", strip=True)
+        arrangement = next(
+            (
+                value
+                for key, value in detail.items()
+                if any(
+                    tag in key.casefold()
+                    for tag in ("flexiblework", "workarrangement", "remotetype")
+                )
+                and _usable_text(value)
+            ),
+            None,
+        )
+        if not arrangement:
+            match = re.search(
+                r"Flexible Work Arrangements\s*:\s*(Remote|Hybrid|Onsite|On-site|Not Applicable)",
+                text,
+                re.I,
+            )
+            arrangement = match.group(1) if match else None
+        metadata = dict(raw.metadata)
+        phenom = dict(phenom)
+        phenom["detail_checked"] = True
+        if arrangement:
+            phenom["work_arrangement"] = str(arrangement)
+        metadata["phenom"] = phenom
+        if arrangement:
+            metadata["eligibility"] = {"work_arrangement": str(arrangement)}
+        return raw.model_copy(
+            update={
+                "description_raw": _html_text(str(description))
+                if description
+                else raw.description_raw,
+                "metadata": metadata,
+            }
+        )
 
 
 class SuccessFactorsSource(JobSource):
@@ -2589,6 +2860,7 @@ SOURCE_CLASSES: dict[AtsType, type[JobSource]] = {
     AtsType.JSONLD: JsonLdSource,
     AtsType.EIGHTFOLD: EightfoldSource,
     AtsType.SUCCESSFACTORS: SuccessFactorsSource,
+    AtsType.PHENOM: PhenomSource,
     AtsType.TEAMTAILOR: TeamtailorSource,
     AtsType.CITY_OF_HOPE: CityOfHopeSource,
     AtsType.CHARTER_RESEARCH: CharterResearchSource,
