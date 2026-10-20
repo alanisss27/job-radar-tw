@@ -541,7 +541,7 @@ class Storage:
     def finish_run(
         self,
         run_id: str,
-        stats: dict[str, int],
+        stats: dict,
         errors: list[dict[str, str]],
     ) -> bool:
         status = (

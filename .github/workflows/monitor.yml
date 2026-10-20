@@ -69,11 +69,44 @@ jobs:
 
       - run: uv sync --frozen --extra llm
 
-      - name: Validate public configuration
+      - name: Provision private preferences
+        id: preferences
+        if: github.event_name == 'schedule' || inputs.clinical_title_backfill_report != true
+        shell: bash
+        env:
+          PREFERENCES_YAML: ${{ secrets.PREFERENCES_YAML }}
+        run: |
+          if [[ -z "${PREFERENCES_YAML:-}" ]]; then
+            echo "::error::PREFERENCES_YAML is required for production matching; no monitor or notifications will run."
+            exit 1
+          fi
+          umask 077
+          preferences_file="$(mktemp "${RUNNER_TEMP}/job-radar-preferences.XXXXXX")"
+          printf '%s\n' "$PREFERENCES_YAML" > "$preferences_file"
+          uv run python - "$preferences_file" <<'PY'
+          import sys
+          from pathlib import Path
+          from job_monitor.config import load_preferences
+          try:
+              preferences = load_preferences(Path(sys.argv[1]))
+              eligibility = preferences.candidate_eligibility
+              if (
+                  eligibility is None
+                  or eligibility.residence_state is None
+                  or eligibility.commuting_policy.onsite_states is None
+              ):
+                  raise ValueError("Explicit residence and onsite scope are required")
+          except Exception:
+              sys.exit("Invalid PREFERENCES_YAML; correct the private preferences secret.")
+          PY
+          printf '%s\n' "PREFERENCES_CONFIG=$preferences_file" >> "$GITHUB_ENV"
+          printf '%s\n' 'ready=true' >> "$GITHUB_OUTPUT"
+
+      - name: Validate effective configuration
         run: uv run monitor validate-config --strict
 
       - name: Run scheduled monitor
-        if: github.event_name == 'schedule'
+        if: github.event_name == 'schedule' && steps.preferences.outputs.ready == 'true'
         shell: bash
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
@@ -101,7 +134,7 @@ jobs:
           timeout --signal=INT --kill-after=30s 110m uv run monitor run --scheduled
 
       - name: Run manual monitor
-        if: github.event_name == 'workflow_dispatch' && inputs.clinical_title_backfill != true && inputs.clinical_title_backfill_report != true
+        if: github.event_name == 'workflow_dispatch' && inputs.clinical_title_backfill != true && inputs.clinical_title_backfill_report != true && steps.preferences.outputs.ready == 'true'
         shell: bash
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
@@ -148,7 +181,7 @@ jobs:
           timeout --signal=INT --kill-after=30s 45m uv run monitor run "${args[@]}"
 
       - name: Run one-time clinical title backfill
-        if: github.event_name == 'workflow_dispatch' && inputs.clinical_title_backfill == true && inputs.clinical_title_backfill_report != true
+        if: github.event_name == 'workflow_dispatch' && inputs.clinical_title_backfill == true && inputs.clinical_title_backfill_report != true && steps.preferences.outputs.ready == 'true'
         shell: bash
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
@@ -179,7 +212,7 @@ jobs:
         run: uv run monitor clinical-title-backfill-report --target-run-key "$INPUT_BACKFILL_RUN_KEY"
 
       - name: Notify Telegram on workflow failure
-        if: failure() && inputs.suppress_notifications != true && inputs.clinical_title_backfill_report != true
+        if: failure() && steps.preferences.outputs.ready == 'true' && inputs.suppress_notifications != true && inputs.clinical_title_backfill_report != true
         shell: bash
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}

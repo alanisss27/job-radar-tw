@@ -392,6 +392,18 @@ async def test_partial_baseline_retry_does_not_enqueue_initial_jobs(tmp_path, mo
     assert not storage.is_baseline_completed(company_id)
     assert storage.pending_notification_count() == 0
 
+    from sqlalchemy import select
+    from job_monitor.storage import source_runs
+
+    with storage.engine.connect() as conn:
+        failed_stats = conn.execute(
+            select(source_runs.c.stats).where(source_runs.c.run_key == "baseline-attempt-1")
+        ).scalar_one()
+    diagnostics = failed_stats["decision_diagnostics"]
+    assert diagnostics["complete"] is False
+    assert diagnostics["profile_decisions"] > 0
+    assert diagnostics["source_stage"]["total_excluded"] is None
+
     retry = await pipeline.run_pipeline(
         settings,
         [company],

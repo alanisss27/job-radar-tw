@@ -71,6 +71,44 @@ private configuration does not automatically propagate to deployment; provision
 it privately when deploying. National US-remote opportunities do not require a
 commuting policy. Only the targeted posting-age migration below automatically reevaluates historical matches.
 
+### Scheduled/local parity
+
+Production matching in the monitor workflow requires a repository Actions secret named
+`PREFERENCES_YAML`. Supply the full private preferences YAML used locally (the
+`preferences:` mapping), not a file path. It is written with private permissions
+to an unpredictable runner-temporary file, validated without echoing its contents,
+and selected through the existing `PREFERENCES_CONFIG` environment variable before
+configuration validation and any scheduled/manual/backfill monitor step. The
+private file is not checked out, committed, or uploaded. Private YAML must keep
+candidate eligibility enabled and explicitly configure residence and onsite state
+scope. Missing, invalid, disabled, or unknown eligibility configuration stops the
+job before matching, with a generic error and no validation input in logs. Monitor
+steps and the workflow failure Telegram alert also require the successful private
+configuration readiness output. A missing/invalid secret therefore sends no
+notifications. Only the read-only clinical backfill report path may skip private
+provisioning; it does not run matching or notify. Local development continues to
+use the existing loader/public defaults unless `PREFERENCES_CONFIG` is supplied.
+
+For the intended Florida-only policy, the normalized private settings are:
+`residence_state: FL`, `held_professional_licenses: []`,
+`commuting_policy.onsite_states: [FL]`, and
+`commuting_policy.limited_attendance_states: []`. Keep `location_terms: []` until
+a practical commute is explicitly approved. Keep remote work enabled and the
+citizenship/clearance exclusions enabled. Copy the existing private seniority
+settings unchanged. The general `search_area` label is descriptive only and may
+be omitted from the secret; do not include an address or other unnecessary facts.
+Use the same effective settings for local and scheduled runs when updating either.
+
+This policy rejects resolved out-of-state physical attendance, including limited
+attendance; Florida onsite/hybrid remains review-needed without practical commute
+approval. State-wide review is not a Central Florida commute guarantee, and no
+radius, driving time, or city-wide approval is inferred. Explicit US-remote scope
+must permit Florida residence; unknown scope remains review-needed. Ordinary
+travel does not itself impose an attendance ban, but mandatory out-of-state office
+attendance is not treated as travel permission. There are no separate relocation
+or travel-preference switches in the current schema; geographic screening and
+manual review retain their documented free-text parsing limits.
+
 ## Attendance and location interpretation
 
 Explicit physical attendance of 1-2 days/week is classified as limited, 3-7 as

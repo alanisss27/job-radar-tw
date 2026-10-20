@@ -18,6 +18,8 @@ from .config import CandidateProfile, ProfileConfig, SearchPreferences, Settings
 from .llm import LLMEnricher
 from .matching import match_job, parse_job
 from .eligibility import candidate_rejections
+from .diagnostics import DecisionDiagnostics
+from .transferable_operations import PROFILE as OPERATIONS_PROFILE
 from .models import CompanyConfig, MatchedJob, MatchResult, ParsedJob, RawJob
 from .notifier import (
     TelegramNotifier,
@@ -46,19 +48,38 @@ def _potential_city_of_hope_candidate(results: list[MatchResult]) -> bool:
         result.eligible
         or result.discovery_eligible
         or result.needs_eligibility_review
+        or (
+            result.profile == OPERATIONS_PROFILE
+            and result.filtered_reason
+            in {
+                "operations_duties_insufficient",
+                "operations_transferability_unverified",
+            }
+        )
         or any(
-            reason.startswith((
-                "clinical coordination:",
-                "clinical project support:",
-                "clinical trial manager:",
-                "transferable life-science PM:",
-                "discovery title family:",
-                "responsibilities:",
-            ))
+            reason.startswith(
+                (
+                    "clinical coordination:",
+                    "clinical project support:",
+                    "clinical trial manager:",
+                    "transferable life-science PM:",
+                    "transferable operations:",
+                    "discovery title family:",
+                    "responsibilities:",
+                )
+            )
             for reason in result.reasons
         )
         for result in results
     )
+
+
+def _discovery_profiles(company: CompanyConfig, profiles: dict) -> list[str]:
+    """Apply the bounded supplemental profile to existing inventory only."""
+    names = list(company.profiles)
+    if OPERATIONS_PROFILE in profiles and OPERATIONS_PROFILE not in names:
+        names.append(OPERATIONS_PROFILE)
+    return names
 
 
 @dataclass
@@ -82,9 +103,13 @@ class RunReport:
     dry_run_matches: list[MatchedJob] = field(default_factory=list)
     zero_job_sources: list[str] = field(default_factory=list)
     skipped_reason: str | None = None
+    diagnostics: dict | None = None
 
-    def stats(self) -> dict[str, int]:
-        return {key: value for key, value in self.__dict__.items() if isinstance(value, int)}
+    def stats(self) -> dict:
+        stats = {key: value for key, value in self.__dict__.items() if isinstance(value, int)}
+        if self.diagnostics is not None:
+            stats["decision_diagnostics"] = self.diagnostics
+        return stats
 
 
 @dataclass
@@ -359,6 +384,8 @@ async def run_pipeline(
 ) -> RunReport:
     key = run_key or local_run_key(timezone=settings.monitor_timezone)
     report = RunReport(run_key=key)
+    diagnostics = DecisionDiagnostics()
+    diagnostics_complete = False
     if not dry_run and not settings.database_url:
         raise ValueError("DATABASE_URL is required outside dry-run")
     resume = load_resume(
@@ -435,6 +462,8 @@ async def run_pipeline(
 
                 raw_jobs = source_result.raw_jobs
                 report.source_warnings.extend(source_result.warnings)
+                for warning in source_result.warnings:
+                    diagnostics.observe_source_warning(warning)
                 report.jobs_fetched += len(raw_jobs)
                 if company.source_verified and not raw_jobs:
                     report.zero_job_sources.append(company.name)
@@ -466,6 +495,7 @@ async def run_pipeline(
                 )
 
                 for raw in raw_jobs:
+                    diagnostics.observe_job(company.slug, raw.stable_external_id)
                     parsed = parse_job(raw)
                     observed_at = datetime.now(UTC)
                     plan = (
@@ -523,7 +553,7 @@ async def run_pipeline(
                                 candidate=candidate,
                                 company_ndx_member=company.ndx_member,
                             )
-                            for profile_name in company.profiles
+                            for profile_name in _discovery_profiles(company, profiles)
                         ]
                         potential = _potential_city_of_hope_candidate(preliminary)
                         if potential:
@@ -541,7 +571,7 @@ async def run_pipeline(
 
                     decisions: list[MatchDecision] = []
                     eligible_matches: list[MatchedJob] = []
-                    for profile_name in company.profiles:
+                    for profile_name in _discovery_profiles(company, profiles):
                         profile: ProfileConfig = profiles[profile_name]
                         result = match_job(
                             parsed,
@@ -573,6 +603,7 @@ async def run_pipeline(
                                 result.used_llm = True
                             except Exception as exc:
                                 logger.warning("LLM fallback for %s: %s", raw.title, exc)
+                        diagnostics.observe(company.slug, raw.stable_external_id, result)
                         matched = None
                         notification_message = None
                         if result.notification_eligible or result.needs_eligibility_review:
@@ -732,6 +763,10 @@ async def run_pipeline(
                         report.notifications += 1
                 report.notifications_pending = storage.pending_notification_count()
 
+            diagnostics_complete = report.sources_succeeded == report.sources_attempted
+            report.diagnostics = diagnostics.snapshot(
+                run_id, report.stats(), complete=diagnostics_complete
+            )
             if notifier and report.sources_attempted and not report.sources_succeeded:
                 await _try_send_notification(
                     notifier,
@@ -763,6 +798,9 @@ async def run_pipeline(
         report.errors.append({"company": "pipeline", "error": _safe_error(exc, settings)})
         raise
     finally:
+        report.diagnostics = diagnostics.snapshot(
+            run_id, report.stats(), complete=diagnostics_complete
+        )
         if storage:
             storage.finish_run(run_id, report.stats(), report.errors)
     return report

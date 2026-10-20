@@ -9,6 +9,7 @@ from .eligibility import assess_candidate, work_arrangement
 from .models import (
     CandidateProfile,
     DegreeLevel,
+    EligibilityAssessment,
     JobLevel,
     MatchResult,
     ParsedJob,
@@ -20,6 +21,7 @@ from .models import (
     VisaSupport,
 )
 from .resume import SKILL_ALIASES
+from .transferable_operations import PROFILE as OPERATIONS_PROFILE, operations_evidence
 
 
 def _clinical_review_flags(title: str, description: str) -> list[ReviewFlag]:
@@ -941,6 +943,25 @@ def _match_discovery(
                 required_years_min=job.required_years_min,
             )
 
+    if profile.name == OPERATIONS_PROFILE:
+        evidence = operations_evidence(job.raw.title, job.raw.description_raw)
+        return MatchResult(
+            profile=profile.name,
+            score=0.0 if evidence.rejection else 1.0,
+            eligible=evidence.rejection is None,
+            tier="filtered" if evidence.rejection else "strong",
+            filtered_reason=evidence.rejection,
+            reasons=(
+                ["transferable operations: " + ", ".join(evidence.duties)]
+                if evidence.duties
+                else []
+            ),
+            reach=reach,
+            bucket=bucket,
+            level=job.level.value if candidate else None,
+            required_years_min=job.required_years_min if candidate else None,
+        )
+
     title_text = job.raw.title.lower()
     title_desc = f"{job.raw.title} {job.raw.description_raw}".lower()
     title_hit = (
@@ -1162,4 +1183,26 @@ def match_job(
         result.eligibility_reasons = assessment.hard_reasons + assessment.review_reasons
         result.eligible = result.eligible and assessment.status == "eligible"
         # Discovery tier, score, reasons and existing career filters remain intact.
+    if profile.name == OPERATIONS_PROFILE and result.filtered_reason in {
+        None,
+        "operations_duties_insufficient",
+        "operations_transferability_unverified",
+    }:
+        # This model has no verified operations/product skills or required-degree
+        # evidence. Never promote duty evidence into candidate qualification.
+        assessment = result.candidate_eligibility or EligibilityAssessment()
+        if result.filtered_reason is not None:
+            assessment.review_reasons.append(
+                result.filtered_reason + ": affirmative JD evidence is missing"
+            )
+        assessment.review_reasons.append(
+            "operations_qualifications_unverified: "
+            "transferable experience and JD requirements need review"
+        )
+        assessment.status = "unsuitable" if assessment.hard_reasons else "review_needed"
+        if result.discovery_eligible is None:
+            result.discovery_eligible = result.eligible
+        result.candidate_eligibility = assessment
+        result.eligibility_reasons = assessment.hard_reasons + assessment.review_reasons
+        result.eligible = False
     return result
