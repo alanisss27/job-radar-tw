@@ -6,6 +6,7 @@ import re
 from dataclasses import dataclass
 
 from .eligibility import clauses
+from .clinical_support import clinical_work_clauses, implementation_alias
 
 PROFILE = "transferable-operations"
 
@@ -61,6 +62,9 @@ class OperationsEvidence:
 
 
 def operations_evidence(title: str, description: str) -> OperationsEvidence:
+    alias = implementation_alias(title)
+    if alias:
+        title = alias
     title = re.sub(
         r"\s*(?:\((?:remote|us remote|united states|florida)\)|[-–—] (?:remote|us remote))\s*$",
         "",
@@ -95,6 +99,13 @@ def operations_evidence(title: str, description: str) -> OperationsEvidence:
         # Explicit requirements and assigned specialist duties are exclusions.
         if not negated and (
             _OWNERSHIP.search(text)
+            or alias
+            and _ACTION.match(text)
+            and re.search(
+                r"\b(?:software|engineering|Salesforce|SAP|Epic|HL7|FHIR|API integrations?)\b",
+                text,
+                re.I,
+            )
             or _SPECIALIZED.search(text)
             and (
                 required_section
@@ -130,6 +141,8 @@ def operations_evidence(title: str, description: str) -> OperationsEvidence:
             duties.update(
                 code for code, pattern in _DUTIES.items() if re.search(pattern, text, re.I)
             )
+    if alias and not clinical_work_clauses(description):
+        return OperationsEvidence(tuple(sorted(duties)), "operations_clinical_context_missing")
     if normalized == "associate product manager" and not accepts_transfer:
         return OperationsEvidence(tuple(sorted(duties)), "operations_transferability_unverified")
     return OperationsEvidence(

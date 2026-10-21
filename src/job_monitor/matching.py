@@ -5,6 +5,12 @@ import re
 
 from .config import ProfileConfig, SearchPreferences
 from .discovery import contextual_title_evidence
+from .clinical_support import (
+    clinical_alias_title,
+    implementation_alias,
+    quality_support_evidence,
+    quality_support_title,
+)
 from .eligibility import assess_candidate, work_arrangement
 from .models import (
     CandidateProfile,
@@ -980,6 +986,29 @@ def _match_discovery(
             required_years_min=job.required_years_min if candidate else None,
         )
 
+    if profile.name == "clinical-discovery" and quality_support_title(job.raw.title):
+        evidence = quality_support_evidence(job.raw.title, job.raw.description_raw)
+        return MatchResult(
+            profile=profile.name,
+            score=1.0 if not evidence.rejection else 0.0,
+            eligible=evidence.rejection is None,
+            tier="strong" if not evidence.rejection else "filtered",
+            filtered_reason=evidence.rejection,
+            reasons=["clinical quality support: " + ", ".join(evidence.duties)]
+            if evidence.duties
+            else [],
+            bucket=bucket,
+            reach=reach,
+        )
+    if profile.name == "clinical-discovery" and implementation_alias(job.raw.title):
+        return MatchResult(
+            profile=profile.name,
+            score=0,
+            eligible=False,
+            tier="filtered",
+            filtered_reason="operations_review_only",
+        )
+
     title_text = job.raw.title.lower()
     title_desc = f"{job.raw.title} {job.raw.description_raw}".lower()
     title_hit = (
@@ -1002,6 +1031,16 @@ def _match_discovery(
         contextual_title_hits = contextual_title_evidence(
             job.raw.title, job.raw.description_raw, profile.contextual_title_families
         )
+        if clinical_alias_title(job.raw.title) and not any(
+            hit.startswith("clinical_support_aliases:") for hit in contextual_title_hits
+        ):
+            return MatchResult(
+                profile=profile.name,
+                score=0,
+                eligible=False,
+                tier="filtered",
+                filtered_reason="clinical_alias_context_missing",
+            )
         clinical_trial_manager_hits = _clinical_trial_manager_evidence(
             job.raw.title, job.raw.description_raw
         )
@@ -1205,6 +1244,7 @@ def match_job(
         None,
         "operations_duties_insufficient",
         "operations_transferability_unverified",
+        "operations_clinical_context_missing",
     }:
         # This model has no verified operations/product skills or required-degree
         # evidence. Never promote duty evidence into candidate qualification.
@@ -1220,6 +1260,28 @@ def match_job(
         assessment.status = "unsuitable" if assessment.hard_reasons else "review_needed"
         if result.discovery_eligible is None:
             result.discovery_eligible = result.eligible
+        result.candidate_eligibility = assessment
+        result.eligibility_reasons = assessment.hard_reasons + assessment.review_reasons
+        result.eligible = False
+    if quality_support_title(job.raw.title) and result.filtered_reason not in {
+        "citizenship_or_clearance",
+        "visa_sponsorship",
+        "seniority",
+        "level_reach",
+        "reach",
+    }:
+        # P3 cannot leak an alert through a generic/overlapping profile either.
+        evidence = quality_support_evidence(job.raw.title, job.raw.description_raw)
+        assessment = result.candidate_eligibility or EligibilityAssessment()
+        if evidence.rejection:
+            result.filtered_reason = evidence.rejection
+            result.discovery_eligible = False
+        elif result.discovery_eligible is None:
+            result.discovery_eligible = result.eligible
+        assessment.review_reasons.append(
+            "clinical_quality_qualifications_unverified: clinical quality/document support requires review"
+        )
+        assessment.status = "unsuitable" if assessment.hard_reasons else "review_needed"
         result.candidate_eligibility = assessment
         result.eligibility_reasons = assessment.hard_reasons + assessment.review_reasons
         result.eligible = False
