@@ -119,7 +119,8 @@ jobs:
           VISA_SPONSORSHIP_REQUIRED: ${{ vars.VISA_SPONSORSHIP_REQUIRED || 'false' }}
           MONITOR_TIMEZONE: America/New_York
           MONITOR_HOUR: "7"
-          SCHEDULE_GRACE_HOURS: "4"
+          # Same-day catch-up: 07:00 inclusive to 15:00 exclusive, New York time.
+          SCHEDULE_GRACE_HOURS: "8"
           IMMEDIATE_NOTIFICATION_MIN_SCORE: ${{ vars.IMMEDIATE_NOTIFICATION_MIN_SCORE || '0.82' }}
           IMMEDIATE_NOTIFICATION_MAX_SOURCE_AGE_DAYS: ${{ vars.IMMEDIATE_NOTIFICATION_MAX_SOURCE_AGE_DAYS || '21' }}
           IMMEDIATE_NOTIFICATION_MAX_PER_RUN: ${{ vars.IMMEDIATE_NOTIFICATION_MAX_PER_RUN || '5' }}
@@ -131,7 +132,27 @@ jobs:
             export RESUME_PATH="$resume_file"
             unset RESUME_TEXT
           fi
-          timeout --signal=INT --kill-after=30s 110m uv run monitor run --scheduled
+          timeout --signal=INT --kill-after=30s 110m uv run monitor run --scheduled --status-file "${RUNNER_TEMP}/job-radar-scan-status.json"
+
+      - name: Summarize scheduled scan outcome
+        if: always() && github.event_name == 'schedule'
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          path = Path(os.environ["RUNNER_TEMP"]) / "job-radar-scan-status.json"
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+              summary.write("## Scheduled scan outcome\n\n")
+              if path.exists():
+                  status = json.loads(path.read_text(encoding="utf-8"))
+                  summary.write("```json\n" + json.dumps(status, indent=2) + "\n```\n")
+              else:
+                  summary.write("Scan outcome: unknown. No status report was produced; "
+                                "do not interpret workflow status as a completed scan.\n")
+          PY
 
       - name: Run manual monitor
         if: github.event_name == 'workflow_dispatch' && inputs.clinical_title_backfill != true && inputs.clinical_title_backfill_report != true && steps.preferences.outputs.ready == 'true'

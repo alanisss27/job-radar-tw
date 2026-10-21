@@ -29,6 +29,25 @@ def scheduled_run_key(
     return f"daily-{scheduled_date.isoformat()}"
 
 
+def schedule_decision(
+    now: datetime,
+    *,
+    timezone: str,
+    hour: int,
+    grace_hours: int,
+) -> dict[str, str]:
+    """Describe the current local day's window without claiming a database run."""
+    current = now.astimezone(ZoneInfo(timezone))
+    start = current.replace(hour=hour, minute=0, second=0, microsecond=0)
+    return {
+        "decision_time": current.isoformat(),
+        "timezone": timezone,
+        "window_start": start.isoformat(),
+        "cutoff_exclusive": (start + timedelta(hours=grace_hours)).isoformat(),
+        "daily_key": local_run_key(now, timezone=timezone),
+    }
+
+
 def is_scheduled_window(
     now: datetime | None = None,
     *,
