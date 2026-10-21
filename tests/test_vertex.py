@@ -14,7 +14,8 @@ from job_monitor.sources import SOURCE_CLASSES, WorkdayRequestController, Workda
 
 
 COMPANY = next(
-    company for company in load_companies(Path("config/companies.yml"))
+    company
+    for company in load_companies(Path("config/companies.yml"))
     if company.slug == "vertex-pharmaceuticals"
 )
 PROFILE = load_profiles(Path("config/profiles.yml"))["clinical-discovery"]
@@ -43,25 +44,42 @@ async def test_vertex_paginates_limit_twenty_and_enriches_details():
     cfg.ats_config["limit"] = 2
     endpoint = cfg.ats_config["endpoint"]
     detail_base = cfg.ats_config["detail_api_base"]
-    listings = respx.post(endpoint).mock(side_effect=[
-        httpx.Response(200, json={
-            "total": 3,
-            "jobPostings": [
-                {"externalPath": "/job/1", "title": "Clinical Study Quality Lead",
-                 "locationsText": "Boston, MA"},
-                {"externalPath": "/job/2", "title": "GMP Validation Associate Director",
-                 "locationsText": "Boston, MA"},
-            ],
-        }),
-        # Vertex may report total=0 after the first page while still returning jobs.
-        httpx.Response(200, json={
-            "total": 0,
-            "jobPostings": [
-                {"externalPath": "/job/3", "title": "Clinical Operations Manager",
-                 "locationsText": "Boston, MA"},
-            ],
-        }),
-    ])
+    listings = respx.post(endpoint).mock(
+        side_effect=[
+            httpx.Response(
+                200,
+                json={
+                    "total": 3,
+                    "jobPostings": [
+                        {
+                            "externalPath": "/job/1",
+                            "title": "Clinical Study Quality Lead",
+                            "locationsText": "Boston, MA",
+                        },
+                        {
+                            "externalPath": "/job/2",
+                            "title": "GMP Validation Associate Director",
+                            "locationsText": "Boston, MA",
+                        },
+                    ],
+                },
+            ),
+            # Vertex may report total=0 after the first page while still returning jobs.
+            httpx.Response(
+                200,
+                json={
+                    "total": 0,
+                    "jobPostings": [
+                        {
+                            "externalPath": "/job/3",
+                            "title": "Clinical Operations Manager",
+                            "locationsText": "Boston, MA",
+                        },
+                    ],
+                },
+            ),
+        ]
+    )
     for path, detail in {
         "/job/1": {
             "location": "Boston, MA",
@@ -93,9 +111,7 @@ async def test_vertex_paginates_limit_twenty_and_enriches_details():
     requests = [json.loads(call.request.content) for call in listings.calls]
     assert all(request["limit"] == 2 for request in requests)
     assert all(
-        request["appliedFacets"] == {
-            "locationCountry": ["bc33aa3152ec42d4995f4791a106ed09"]
-        }
+        request["appliedFacets"] == {"locationCountry": ["bc33aa3152ec42d4995f4791a106ed09"]}
         for request in requests
     )
     assert len(jobs) == 3
@@ -123,9 +139,7 @@ async def test_vertex_paginates_limit_twenty_and_enriches_details():
         ),
     ],
 )
-def test_vertex_senior_and_false_friend_roles_stay_below_discovery_threshold(
-    title, description
-):
+def test_vertex_senior_and_false_friend_roles_stay_below_discovery_threshold(title, description):
     raw = RawJob(
         source_company="vertex-pharmaceuticals",
         external_job_id=title,

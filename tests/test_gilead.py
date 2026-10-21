@@ -15,7 +15,8 @@ from job_monitor.sources import SOURCE_CLASSES, SourceError, WorkdayRequestContr
 
 
 COMPANY = next(
-    company for company in load_companies(Path("config/companies.yml"))
+    company
+    for company in load_companies(Path("config/companies.yml"))
     if company.slug == "gilead-sciences"
 )
 PROFILE = load_profiles(Path("config/profiles.yml"))["clinical-discovery"]
@@ -44,33 +45,51 @@ def test_gilead_uses_verified_official_workday_configuration():
 
 @pytest.mark.parametrize(
     "label",
-    ["United States - California - Foster City", "United States - New Jersey - Parsippany",
-     "US Field", "US Remote"],
+    [
+        "United States - California - Foster City",
+        "United States - New Jersey - Parsippany",
+        "US Field",
+        "US Remote",
+    ],
 )
 def test_gilead_scope_pattern_accepts_us_location_labels(label):
     assert PATTERN.search(label)
 
 
 @pytest.mark.parametrize(
-    "label", ["Ireland - Dublin", "Canada - Toronto", "Remote - Europe", "2 Locations",
-               "United States - All", "US"]
+    "label",
+    [
+        "Ireland - Dublin",
+        "Canada - Toronto",
+        "Remote - Europe",
+        "2 Locations",
+        "United States - All",
+        "US",
+    ],
 )
 def test_gilead_scope_pattern_rejects_ambiguous_or_foreign_labels(label):
     assert not PATTERN.search(label)
 
 
 def _facets():
-    return [{
-        "facetParameter": "locationMainGroup",
-        "values": [{
-            "facetParameter": "locations",
+    return [
+        {
+            "facetParameter": "locationMainGroup",
             "values": [
-                {"descriptor": "United States - California - Foster City", "id": "us-foster"},
-                {"descriptor": "US Remote", "id": "us-remote"},
-                {"descriptor": "Ireland - Dublin", "id": "ie-dublin"},
+                {
+                    "facetParameter": "locations",
+                    "values": [
+                        {
+                            "descriptor": "United States - California - Foster City",
+                            "id": "us-foster",
+                        },
+                        {"descriptor": "US Remote", "id": "us-remote"},
+                        {"descriptor": "Ireland - Dublin", "id": "ie-dublin"},
+                    ],
+                }
             ],
-        }],
-    }]
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -88,41 +107,68 @@ async def test_gilead_resolves_nested_us_facets_deduplicates_and_enriches_detail
         assert body["appliedFacets"] == {"locations": ["us-foster", "us-remote"]}
         if body["offset"] == 0:
             postings = [
-                {"externalPath": "/job/R-good", "title": "Clinical Program Manager",
-                 "locationsText": "United States - California - Foster City"},
-                {"externalPath": "/job/R-mixed", "title": "Clinical Trials Manager",
-                 "locationsText": "2 Locations"},
+                {
+                    "externalPath": "/job/R-good",
+                    "title": "Clinical Program Manager",
+                    "locationsText": "United States - California - Foster City",
+                },
+                {
+                    "externalPath": "/job/R-mixed",
+                    "title": "Clinical Trials Manager",
+                    "locationsText": "2 Locations",
+                },
             ]
         else:
             postings = [
-                {"externalPath": "/job/R-mixed", "title": "Clinical Trials Manager",
-                 "locationsText": "2 Locations"},
-                {"externalPath": "/job/R-remote", "title": "Clinical Operations Intern",
-                 "locationsText": "US Remote"},
+                {
+                    "externalPath": "/job/R-mixed",
+                    "title": "Clinical Trials Manager",
+                    "locationsText": "2 Locations",
+                },
+                {
+                    "externalPath": "/job/R-remote",
+                    "title": "Clinical Operations Intern",
+                    "locationsText": "US Remote",
+                },
             ]
         return httpx.Response(200, json={"total": 3, "jobPostings": postings})
 
     listing_route = respx.post(endpoint).mock(side_effect=listing)
-    respx.get(detail_base + "/job/R-good").respond(200, json={"jobPostingInfo": {
-        "location": "United States - California - Foster City",
-        "additionalLocations": ["United States - California - Santa Monica"],
-        "country": {"descriptor": "United States of America"},
-        "jobDescription": "<p>Hybrid-Eligible clinical program leadership.</p>",
-    }})
-    respx.get(detail_base + "/job/R-mixed").respond(200, json={"jobPostingInfo": {
-        "location": "Ireland - Dublin",
-        "additionalLocations": ["United States - California - Foster City"],
-        "country": {"descriptor": "Ireland"},
-        "jobRequisitionLocation": {"country": {"alpha2Code": "IE"}},
-        "jobDescription": "<p>Coordinate global study operations.</p>",
-    }})
-    respx.get(detail_base + "/job/R-remote").respond(200, json={"jobPostingInfo": {
-        "location": "US Remote",
-        "additionalLocations": [],
-        "country": {"descriptor": "United States of America"},
-        "remoteType": "Remote",
-        "jobDescription": "<p>Remote-Eligible study operations support.</p>",
-    }})
+    respx.get(detail_base + "/job/R-good").respond(
+        200,
+        json={
+            "jobPostingInfo": {
+                "location": "United States - California - Foster City",
+                "additionalLocations": ["United States - California - Santa Monica"],
+                "country": {"descriptor": "United States of America"},
+                "jobDescription": "<p>Hybrid-Eligible clinical program leadership.</p>",
+            }
+        },
+    )
+    respx.get(detail_base + "/job/R-mixed").respond(
+        200,
+        json={
+            "jobPostingInfo": {
+                "location": "Ireland - Dublin",
+                "additionalLocations": ["United States - California - Foster City"],
+                "country": {"descriptor": "Ireland"},
+                "jobRequisitionLocation": {"country": {"alpha2Code": "IE"}},
+                "jobDescription": "<p>Coordinate global study operations.</p>",
+            }
+        },
+    )
+    respx.get(detail_base + "/job/R-remote").respond(
+        200,
+        json={
+            "jobPostingInfo": {
+                "location": "US Remote",
+                "additionalLocations": [],
+                "country": {"descriptor": "United States of America"},
+                "remoteType": "Remote",
+                "jobDescription": "<p>Remote-Eligible study operations support.</p>",
+            }
+        },
+    )
 
     async with httpx.AsyncClient() as client:
         jobs = await WorkdaySource(
@@ -132,8 +178,10 @@ async def test_gilead_resolves_nested_us_facets_deduplicates_and_enriches_detail
     assert listing_route.call_count == 3  # facet discovery plus two pages
     page_requests = [json.loads(call.request.content) for call in listing_route.calls[1:]]
     assert all(request["limit"] == 2 for request in page_requests)
-    assert all(request["appliedFacets"] == {"locations": ["us-foster", "us-remote"]}
-               for request in page_requests)
+    assert all(
+        request["appliedFacets"] == {"locations": ["us-foster", "us-remote"]}
+        for request in page_requests
+    )
     assert [job.external_job_id for job in jobs] == ["/job/R-good", "/job/R-mixed", "/job/R-remote"]
     assert "Hybrid-Eligible" in jobs[0].description_raw
     assert "Remote-Eligible" in jobs[2].description_raw
@@ -143,19 +191,33 @@ async def test_gilead_resolves_nested_us_facets_deduplicates_and_enriches_detail
     assert evidence["additional"] == ["United States - California - Foster City"]
     assert evidence["scoped_additional"] == ["United States - California - Foster City"]
     assert "Ireland - Dublin" in mixed.location_raw
-    assert "United States - California - Foster City, United States of America" in mixed.location_raw
+    assert (
+        "United States - California - Foster City, United States of America" in mixed.location_raw
+    )
 
 
 @pytest.mark.asyncio
 @respx.mock
 async def test_gilead_missing_or_unsafe_location_facets_fail_closed():
     endpoint = COMPANY.ats_config["endpoint"]
-    route = respx.post(endpoint).respond(200, json={"facets": [{
-        "facetParameter": "locationMainGroup",
-        "values": [{"facetParameter": "locations", "values": [
-            {"descriptor": "Ireland - Dublin", "id": "ie"},
-        ]}],
-    }]})
+    route = respx.post(endpoint).respond(
+        200,
+        json={
+            "facets": [
+                {
+                    "facetParameter": "locationMainGroup",
+                    "values": [
+                        {
+                            "facetParameter": "locations",
+                            "values": [
+                                {"descriptor": "Ireland - Dublin", "id": "ie"},
+                            ],
+                        }
+                    ],
+                }
+            ]
+        },
+    )
     async with httpx.AsyncClient() as client:
         with pytest.raises(SourceError, match="no IDs"):
             await WorkdaySource(COMPANY, client).fetch()
@@ -166,13 +228,18 @@ async def test_gilead_missing_or_unsafe_location_facets_fail_closed():
     ("title", "description"),
     [
         ("Clinical Program Manager", "Own clinical program timelines, budgets, and vendors."),
-        ("Clinical Trials Manager, Early Phase", "Lead study execution, sites, vendors, and protocols."),
+        (
+            "Clinical Trials Manager, Early Phase",
+            "Lead study execution, sites, vendors, and protocols.",
+        ),
         ("Director, Clinical Operations", "Lead global clinical operations and study teams."),
     ],
 )
 def test_current_gilead_senior_roles_remain_below_existing_discovery_threshold(title, description):
     raw = RawJob(
-        source_company="gilead-sciences", external_job_id=title, title=title,
+        source_company="gilead-sciences",
+        external_job_id=title,
+        title=title,
         location_raw="United States - California - Foster City",
         description_raw=description,
         url="https://gilead.wd1.myworkdayjobs.com/gileadcareers/job/example",
@@ -183,11 +250,14 @@ def test_current_gilead_senior_roles_remain_below_existing_discovery_threshold(t
 
 
 @pytest.mark.parametrize(
-    "title", ["Clinical Project Coordinator", "Clinical Operations Associate", "Clinical Trial Associate"]
+    "title",
+    ["Clinical Project Coordinator", "Clinical Operations Associate", "Clinical Trial Associate"],
 )
 def test_existing_transition_families_remain_unchanged(title):
     raw = RawJob(
-        source_company="gilead-sciences", external_job_id=title, title=title,
+        source_company="gilead-sciences",
+        external_job_id=title,
+        title=title,
         location_raw="US Remote",
         description_raw="Coordinate clinical study timelines, risks, budgets, and deliverables.",
         url="https://gilead.wd1.myworkdayjobs.com/gileadcareers/job/example",

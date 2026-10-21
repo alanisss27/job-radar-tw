@@ -192,7 +192,8 @@ def render_run_summary(
     unresolved_count = len(unresolved_reviews)
     reviews = [item for item in reviews if item.result.candidate_eligibility.review_visible]
     matched_jobs = [
-        item for item in matched_jobs
+        item
+        for item in matched_jobs
         if item.result.notification_eligible
         and item.job.raw.metadata.get("active_status") != "inactive"
     ]
@@ -307,16 +308,20 @@ def render_run_summary(
             assessment = item.result.candidate_eligibility
             explanation = "; ".join(assessment.review_reasons)[:450]
             lines.append(
-                f'- {html.escape(item.company_name)} - '
+                f"- {html.escape(item.company_name)} - "
                 f'<a href="{html.escape(str(item.job.raw.url), quote=True)}">{html.escape(item.job.raw.title)}</a> '
-                f'({html.escape(item.job.raw.location_raw or "Location unresolved")}; '
-                f'{assessment.work_arrangement.value}; attendance: {assessment.attendance.category}) '
-                f'{html.escape(explanation)}'
+                f"({html.escape(item.job.raw.location_raw or 'Location unresolved')}; "
+                f"{assessment.work_arrangement.value}; attendance: {assessment.attendance.category}) "
+                f"{html.escape(explanation)}"
             )
         if len(reviews) > max_reviews:
-            lines.append(f"{len(reviews) - max_reviews} additional review records retained in match history.")
+            lines.append(
+                f"{len(reviews) - max_reviews} additional review records retained in match history."
+            )
     if unresolved_count:
-        lines.append(f"Unresolved eligibility/location: {unresolved_count} records retained for inspection; not confirmed local opportunities.")
+        lines.append(
+            f"Unresolved eligibility/location: {unresolved_count} records retained for inspection; not confirmed local opportunities."
+        )
         lines.append("Retained unresolved records (not confirmed local opportunities):")
         for item in sorted(unresolved_reviews, key=lambda match: match.result.score, reverse=True):
             assessment = item.result.candidate_eligibility

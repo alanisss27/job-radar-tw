@@ -14,16 +14,15 @@ from job_monitor.sources import CityOfHopeSource, SOURCE_CLASSES
 
 
 COMPANY = next(
-    item for item in load_companies(Path("config/companies.yml"))
-    if item.slug == "city-of-hope"
+    item for item in load_companies(Path("config/companies.yml")) if item.slug == "city-of-hope"
 )
 LISTING = "https://www.cityofhopejobs.org/jobs/"
 
 
 def card(ref: str, title: str, extra: str = "") -> str:
     return f"""<article class='job-card'>
-      <h3><a href='/job/12032/{ref.lower()}-{title.lower().replace(' ', '-')}'>{title}</a></h3>
-      <span class='job-location'>{'United States (This is a remote job)' if ref == '10036071' else 'Duarte, CA'}</span>
+      <h3><a href='/job/12032/{ref.lower()}-{title.lower().replace(" ", "-")}'>{title}</a></h3>
+      <span class='job-location'>{"United States (This is a remote job)" if ref == "10036071" else "Duarte, CA"}</span>
       <div>Job Ref: {ref} Category: Clinical Research Job Type: Full Time Shift: Days
       Pay Range: $44.90-$69.60/hr</div>
       <p class='job-excerpt'>Clinical study project coordination. {extra}</p>
@@ -33,9 +32,11 @@ def card(ref: str, title: str, extra: str = "") -> str:
 @pytest.mark.asyncio
 @respx.mock
 async def test_city_of_hope_paginates_parses_listing_and_hydrates_candidate_only():
-    first = "<html>" + "".join(
-        card(str(10036000 + i), f"Administrative Role {i}") for i in range(20)
-    ) + "</html>"
+    first = (
+        "<html>"
+        + "".join(card(str(10036000 + i), f"Administrative Role {i}") for i in range(20))
+        + "</html>"
+    )
     # Include a relevant remote role and a full first page to exercise pagination.
     first = first.replace(
         card("10036000", "Administrative Role 0"),
@@ -47,7 +48,9 @@ async def test_city_of_hope_paginates_parses_listing_and_hydrates_candidate_only
         return_value=httpx.Response(200, text=second)
     )
     page1 = respx.get(LISTING, params={}).mock(return_value=httpx.Response(200, text=first))
-    detail_url = "https://www.cityofhopejobs.org/job/12032/10036071-clinical-research-project-coordinator"
+    detail_url = (
+        "https://www.cityofhopejobs.org/job/12032/10036071-clinical-research-project-coordinator"
+    )
     detail = respx.get(detail_url).respond(
         200,
         text="""<main><h1>Clinical Research Project Coordinator</h1>
@@ -103,7 +106,9 @@ async def test_city_of_hope_unavailable_detail_stays_unknown():
         location_raw="Duarte, CA",
         description_raw=remote["excerpt"],
         url=remote["url"],
-        metadata={"city_of_hope": {"detail_url": remote["url"], "listing_hash": remote["listing_hash"]}},
+        metadata={
+            "city_of_hope": {"detail_url": remote["url"], "listing_hash": remote["listing_hash"]}
+        },
     )
     respx.get(remote["url"]).respond(410)
     async with httpx.AsyncClient() as client:

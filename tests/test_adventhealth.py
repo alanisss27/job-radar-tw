@@ -12,7 +12,8 @@ from job_monitor.sources import SOURCE_CLASSES, WorkdayRequestController, Workda
 
 
 COMPANY = next(
-    company for company in load_companies(Path("config/companies.yml"))
+    company
+    for company in load_companies(Path("config/companies.yml"))
     if company.slug == "adventhealth"
 )
 HOST = "adventhealth.wd12.myworkdayjobs.com"
@@ -44,18 +45,32 @@ async def test_adventhealth_paginates_bounded_faceted_inventory_and_preserves_lo
     second_path = "/job/Remote/Clinical-Project-Coordinator_R-test"
     cfg = COMPANY.model_copy(deep=True)
     cfg.ats_config["limit"] = 2
-    listing = respx.post(endpoint).mock(side_effect=[
-        httpx.Response(200, json={
-            "total": 3,
-            "jobPostings": [
-                {"title": "Risk Manager", "externalPath": first_path},
-                {"title": "Clinical Project Coordinator", "externalPath": second_path},
-            ],
-        }),
-        httpx.Response(200, json={"total": 3, "jobPostings": [
-            {"title": "Quality Operations Specialist", "externalPath": "/job/Remote/Quality-Operations_R-test"},
-        ]}),
-    ])
+    listing = respx.post(endpoint).mock(
+        side_effect=[
+            httpx.Response(
+                200,
+                json={
+                    "total": 3,
+                    "jobPostings": [
+                        {"title": "Risk Manager", "externalPath": first_path},
+                        {"title": "Clinical Project Coordinator", "externalPath": second_path},
+                    ],
+                },
+            ),
+            httpx.Response(
+                200,
+                json={
+                    "total": 3,
+                    "jobPostings": [
+                        {
+                            "title": "Quality Operations Specialist",
+                            "externalPath": "/job/Remote/Quality-Operations_R-test",
+                        },
+                    ],
+                },
+            ),
+        ]
+    )
     respx.get(f"{API}{first_path}").respond(
         200,
         json={
@@ -82,13 +97,15 @@ async def test_adventhealth_paginates_bounded_faceted_inventory_and_preserves_lo
     )
     respx.get(f"{API}/job/Remote/Quality-Operations_R-test").respond(
         200,
-        json={"jobPostingInfo": {
-            "location": "Remote",
-            "additionalLocations": [],
-            "country": {"descriptor": "United States of America"},
-            "remoteType": "Fully Remote",
-            "jobDescription": "Support quality operations projects.",
-        }},
+        json={
+            "jobPostingInfo": {
+                "location": "Remote",
+                "additionalLocations": [],
+                "country": {"descriptor": "United States of America"},
+                "remoteType": "Fully Remote",
+                "jobDescription": "Support quality operations projects.",
+            }
+        },
     )
     async with httpx.AsyncClient() as client:
         jobs = await WorkdaySource(
@@ -96,13 +113,16 @@ async def test_adventhealth_paginates_bounded_faceted_inventory_and_preserves_lo
         ).fetch()
     assert listing.call_count == 2
     assert {job.external_job_id for job in jobs} == {
-        first_path, second_path, "/job/Remote/Quality-Operations_R-test"
+        first_path,
+        second_path,
+        "/job/Remote/Quality-Operations_R-test",
     }
     florida = next(job for job in jobs if job.external_job_id == first_path)
     remote = next(job for job in jobs if job.external_job_id == second_path)
     assert florida.location_raw == "Tampa, Florida; Orlando, Florida; United States of America"
     assert florida.metadata["eligibility"]["work_arrangement"] == "On-site"
     assert remote.metadata["eligibility"]["work_arrangement"] == "Fully Remote"
-    assert json.loads(listing.calls[0].request.content)["appliedFacets"] == cfg.ats_config[
-        "applied_facets"
-    ]
+    assert (
+        json.loads(listing.calls[0].request.content)["appliedFacets"]
+        == cfg.ats_config["applied_facets"]
+    )

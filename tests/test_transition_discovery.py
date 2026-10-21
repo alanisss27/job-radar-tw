@@ -24,8 +24,11 @@ BODY = "Support clinical study team updates. Maintain investigator files and upd
 
 def result(title, body=BODY, preferences=None, profile="clinical-discovery"):
     job = RawJob(
-        source_company="example", title=title, description_raw=body,
-        location_raw="Remote United States", url="https://example.com/job/support",
+        source_company="example",
+        title=title,
+        description_raw=body,
+        location_raw="Remote United States",
+        url="https://example.com/job/support",
     )
     return match_job(parse_job(job), PROFILES[profile], preferences or SearchPreferences())
 
@@ -39,36 +42,58 @@ def test_transition_titles_require_multiple_clinical_support_duties(title):
 
 
 @pytest.mark.parametrize("title", TITLES)
-@pytest.mark.parametrize("body", [
-    "",
-    "Our company conducts clinical trials. Assist with general office filing and calendars.",
-    "Maintain TMF documentation for clinical studies.",
-    "CTMS, investigator files, clinical study team updates.",
-    "Support marketing projects. Maintain vendor invoices and software release schedules.",
-    "Maintain investigator files and update CTMS. Our company conducts clinical trials.",
-    "Coordinate clinical study meetings and investigator meetings.",
-])
+@pytest.mark.parametrize(
+    "body",
+    [
+        "",
+        "Our company conducts clinical trials. Assist with general office filing and calendars.",
+        "Maintain TMF documentation for clinical studies.",
+        "CTMS, investigator files, clinical study team updates.",
+        "Support marketing projects. Maintain vendor invoices and software release schedules.",
+        "Maintain investigator files and update CTMS. Our company conducts clinical trials.",
+        "Coordinate clinical study meetings and investigator meetings.",
+    ],
+)
 def test_transition_titles_alone_or_incidental_keywords_do_not_qualify(title, body):
     assert not result(title, body).eligible
 
 
-@pytest.mark.parametrize("title", [
-    "Associate", "Specialist", "Assistant", "Study Coordinator", "Project Support",
-    "Study Management Associate", "Feasibility Specialist", "Site Intelligence Associate",
-    "Vendor Operations Coordinator",
-    "Clinical Study Associate Manager", "Associate Clinical Study Manager",
-    "Clinical Study Associate Director", "Clinical Study Specialist - Study Lead",
-    "Clinical Project Associate - CRA Monitoring", "Clinical Trial Assistant Manager",
-    "Clinical Research Associate", "Clinical Data Manager", "Clinical Team Lead",
-])
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Associate",
+        "Specialist",
+        "Assistant",
+        "Study Coordinator",
+        "Project Support",
+        "Study Management Associate",
+        "Feasibility Specialist",
+        "Site Intelligence Associate",
+        "Vendor Operations Coordinator",
+        "Clinical Study Associate Manager",
+        "Associate Clinical Study Manager",
+        "Clinical Study Associate Director",
+        "Clinical Study Specialist - Study Lead",
+        "Clinical Project Associate - CRA Monitoring",
+        "Clinical Trial Assistant Manager",
+        "Clinical Research Associate",
+        "Clinical Data Manager",
+        "Clinical Team Lead",
+    ],
+)
 def test_other_titles_do_not_inherit_transition_path(title):
     assert not result(title).eligible
 
 
-@pytest.mark.parametrize("title", [
-    "Senior Clinical Study Specialist", "Sr. Clinical Study Associate",
-    "Clinical Trials Assistant - FSP", "Clinical Project Associate (Contract)",
-])
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Senior Clinical Study Specialist",
+        "Sr. Clinical Study Associate",
+        "Clinical Trials Assistant - FSP",
+        "Clinical Project Associate (Contract)",
+    ],
+)
 def test_support_title_qualifiers(title):
     assert result(title).eligible
 
@@ -92,16 +117,22 @@ def test_support_scope_does_not_hide_explicit_ownership_requirement():
     assert any(f.code == "established_ownership_requirement" for f in matched.review_flags)
 
 
-@pytest.mark.parametrize("body,status", [
-    (BODY, "eligible"),
-    (BODY + " Active RN license required.", "unsuitable"),
-    (BODY + " Must reside in California.", "unsuitable"),
-])
+@pytest.mark.parametrize(
+    "body,status",
+    [
+        (BODY, "eligible"),
+        (BODY + " Active RN license required.", "unsuitable"),
+        (BODY + " Must reside in California.", "unsuitable"),
+    ],
+)
 def test_transition_discovery_preserves_candidate_constraints(body, status):
-    preferences = SearchPreferences(candidate_eligibility=CandidateEligibilityConfig(
-        residence_state="Florida", held_professional_licenses=[],
-        commuting_policy={"onsite_states": ["FL"]},
-    ))
+    preferences = SearchPreferences(
+        candidate_eligibility=CandidateEligibilityConfig(
+            residence_state="Florida",
+            held_professional_licenses=[],
+            commuting_policy={"onsite_states": ["FL"]},
+        )
+    )
     matched = result("Clinical Trial Assistant", body, preferences)
     assert matched.discovery_eligible
     assert matched.candidate_eligibility.status == status
@@ -122,9 +153,11 @@ def test_lower_confidence_family_keeps_existing_responsibility_path():
 
 
 def test_transition_discovery_can_require_candidate_review():
-    preferences = SearchPreferences(candidate_eligibility=CandidateEligibilityConfig(
-        held_professional_licenses=[],
-    ))
+    preferences = SearchPreferences(
+        candidate_eligibility=CandidateEligibilityConfig(
+            held_professional_licenses=[],
+        )
+    )
     matched = result("Clinical Study Associate", BODY + " Must reside in Florida.", preferences)
     assert matched.discovery_eligible
     assert matched.candidate_eligibility.status == "review_needed"
@@ -137,11 +170,18 @@ PM_BODY = (
 )
 
 
-@pytest.mark.parametrize("title", [
-    "Project Coordinator", "Project Specialist", "Associate Project Manager",
-    "Scientific Project Coordinator", "Operations Project Coordinator",
-    "Program Coordinator", "Study Coordinator",
-])
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Project Coordinator",
+        "Project Specialist",
+        "Associate Project Manager",
+        "Scientific Project Coordinator",
+        "Operations Project Coordinator",
+        "Program Coordinator",
+        "Study Coordinator",
+    ],
+)
 def test_transferable_pm_requires_distinct_duties(title):
     matched = result(title, PM_BODY)
     assert matched.eligible
@@ -152,59 +192,111 @@ def test_transferable_pm_requires_distinct_duties(title):
     )
 
 
-@pytest.mark.parametrize("title,body", [
-    ("Project Specialist", "Support life sciences projects. Track milestones and project "
-     "deliverables. Coordinate stakeholders and vendors. Prepare status reports and risk tracking."),
-    ("Associate Project Manager", "Own pharmaceutical project scope, timelines and budgets. "
-     "Coordinate stakeholders. Maintain project governance."),
-    ("Scientific Project Coordinator", "Support laboratory operations. Develop project plans "
-     "and milestones. Coordinate cross-functional teams. Maintain project documentation."),
-    ("Project Coordinator", "Support GLP research. Maintain project documentation. "
-     "Coordinate resources and project budgets. Prepare status reports."),
-])
+@pytest.mark.parametrize(
+    "title,body",
+    [
+        (
+            "Project Specialist",
+            "Support life sciences projects. Track milestones and project "
+            "deliverables. Coordinate stakeholders and vendors. Prepare status reports and risk tracking.",
+        ),
+        (
+            "Associate Project Manager",
+            "Own pharmaceutical project scope, timelines and budgets. "
+            "Coordinate stakeholders. Maintain project governance.",
+        ),
+        (
+            "Scientific Project Coordinator",
+            "Support laboratory operations. Develop project plans "
+            "and milestones. Coordinate cross-functional teams. Maintain project documentation.",
+        ),
+        (
+            "Project Coordinator",
+            "Support GLP research. Maintain project documentation. "
+            "Coordinate resources and project budgets. Prepare status reports.",
+        ),
+    ],
+)
 def test_transferable_pm_alternative_categories_and_ownership(title, body):
     assert result(title, body).eligible
 
 
-@pytest.mark.parametrize("title", [
-    "GxP Project Coordinator", "GxP Project Manager", "Validation Project Coordinator",
-    "Validation Project Manager", "Scientific Project Manager",
-])
+@pytest.mark.parametrize(
+    "title",
+    [
+        "GxP Project Coordinator",
+        "GxP Project Manager",
+        "Validation Project Coordinator",
+        "Validation Project Manager",
+        "Scientific Project Manager",
+    ],
+)
 def test_existing_explicit_regulated_titles_keep_title_only_behavior(title):
     assert result(title, "").eligible
 
 
-@pytest.mark.parametrize("title,body", [
-    ("Report Coordinator", "Prepare GLP reports and protocols/amendments using sponsor "
-     "templates. Coordinate meetings and maintain regulated documentation."),
-    ("Project Scientist", "Own scientific research and perform toxicology assays. " + PM_BODY),
-    ("Senior Toxicology Study Director", "Serve as principal investigator for GLP studies. " + PM_BODY),
-    ("Laboratory Technician", "Perform GMP laboratory testing and validation protocols."),
-    ("Research Scientist", "Conduct experiments for biotechnology research projects."),
-    ("QC Specialist", "Perform GMP quality testing and maintain validation documentation."),
-    ("QA Analyst", "Review GLP protocols and regulatory quality documentation."),
-    ("Clinical Research Associate", "Conduct site monitoring and monitor clinical trial sites."),
-    ("Clinical Data Manager", "Manage clinical databases and data cleaning."),
-    ("Administrative Project Coordinator", "Support biotechnology office calendars, "
-     "meeting bookings and travel arrangements."),
-    ("Project Coordinator", "Maintain project plans and timelines for software releases. "
-     "Coordinate cross-functional teams. Track action items and risks."),
-    ("Project Coordinator", "Support biotechnology operations. Maintain project plans, "
-     "timelines, milestones, project schedules and project dependencies."),
-    ("Project Specialist", "Support biotechnology projects. Maintain project plans and "
-     "coordinate stakeholders."),
-    ("Project Coordinator", "GxP biotechnology. Project plans, stakeholder coordination, "
-     "status reporting, project budgets."),
-    ("Project Coordinator", "Support biotechnology. No project plans are assigned. "
-     "Coordinate stakeholders. Prepare status reports."),
-    ("Project Coordinator", PM_BODY + " Perform laboratory testing."),
-    ("Project Coordinator", PM_BODY + " Conduct site monitoring."),
-    ("Senior Manager, Project Coordinator", PM_BODY),
-    ("Associate Director, Project Coordinator", PM_BODY),
-    ("Project Coordinator - Head of Research", PM_BODY),
-    ("Project Coordinator", "Maintain project plans for construction validation. "
-     "Coordinate stakeholders. Prepare status reports."),
-])
+@pytest.mark.parametrize(
+    "title,body",
+    [
+        (
+            "Report Coordinator",
+            "Prepare GLP reports and protocols/amendments using sponsor "
+            "templates. Coordinate meetings and maintain regulated documentation.",
+        ),
+        ("Project Scientist", "Own scientific research and perform toxicology assays. " + PM_BODY),
+        (
+            "Senior Toxicology Study Director",
+            "Serve as principal investigator for GLP studies. " + PM_BODY,
+        ),
+        ("Laboratory Technician", "Perform GMP laboratory testing and validation protocols."),
+        ("Research Scientist", "Conduct experiments for biotechnology research projects."),
+        ("QC Specialist", "Perform GMP quality testing and maintain validation documentation."),
+        ("QA Analyst", "Review GLP protocols and regulatory quality documentation."),
+        (
+            "Clinical Research Associate",
+            "Conduct site monitoring and monitor clinical trial sites.",
+        ),
+        ("Clinical Data Manager", "Manage clinical databases and data cleaning."),
+        (
+            "Administrative Project Coordinator",
+            "Support biotechnology office calendars, meeting bookings and travel arrangements.",
+        ),
+        (
+            "Project Coordinator",
+            "Maintain project plans and timelines for software releases. "
+            "Coordinate cross-functional teams. Track action items and risks.",
+        ),
+        (
+            "Project Coordinator",
+            "Support biotechnology operations. Maintain project plans, "
+            "timelines, milestones, project schedules and project dependencies.",
+        ),
+        (
+            "Project Specialist",
+            "Support biotechnology projects. Maintain project plans and coordinate stakeholders.",
+        ),
+        (
+            "Project Coordinator",
+            "GxP biotechnology. Project plans, stakeholder coordination, "
+            "status reporting, project budgets.",
+        ),
+        (
+            "Project Coordinator",
+            "Support biotechnology. No project plans are assigned. "
+            "Coordinate stakeholders. Prepare status reports.",
+        ),
+        ("Project Coordinator", PM_BODY + " Perform laboratory testing."),
+        ("Project Coordinator", PM_BODY + " Conduct site monitoring."),
+        ("Senior Manager, Project Coordinator", PM_BODY),
+        ("Associate Director, Project Coordinator", PM_BODY),
+        ("Project Coordinator - Head of Research", PM_BODY),
+        (
+            "Project Coordinator",
+            "Maintain project plans for construction validation. "
+            "Coordinate stakeholders. Prepare status reports.",
+        ),
+    ],
+)
 def test_transferable_pm_false_friends(title, body):
     assert not result(title, body).eligible
 
@@ -221,42 +313,80 @@ def test_transferable_pm_reports_all_five_categories_once():
         PM_BODY * 2 + " Maintain project documentation and change control. "
         "Support resource coordination and project financial tracking.",
     )
-    assert "transferable life-science PM: coordination_stakeholders, deliverables_control, " \
+    assert (
+        "transferable life-science PM: coordination_stakeholders, deliverables_control, "
         "planning_schedule, resource_financial, tracking_governance" in matched.reasons
+    )
 
 
-@pytest.mark.parametrize("domain", [
-    "biotech", "pharma", "biopharma", "CRO", "regulated research", "GLP",
-])
+@pytest.mark.parametrize(
+    "domain",
+    [
+        "biotech",
+        "pharma",
+        "biopharma",
+        "CRO",
+        "regulated research",
+        "GLP",
+    ],
+)
 def test_transferable_pm_domain_variants(domain):
-    assert result("Project Coordinator", PM_BODY.replace(
-        "biotechnology projects in a GxP environment", domain + " projects",
-    )).eligible
+    assert result(
+        "Project Coordinator",
+        PM_BODY.replace(
+            "biotechnology projects in a GxP environment",
+            domain + " projects",
+        ),
+    ).eligible
 
 
-@pytest.mark.parametrize("domain", [
-    "corporate", "software", "construction", "marketing", "engineering",
-    "regulatory", "validation", "scientific",
-])
+@pytest.mark.parametrize(
+    "domain",
+    [
+        "corporate",
+        "software",
+        "construction",
+        "marketing",
+        "engineering",
+        "regulatory",
+        "validation",
+        "scientific",
+    ],
+)
 def test_transferable_pm_requires_credible_domain(domain):
-    assert not result("Project Coordinator", PM_BODY.replace(
-        "biotechnology projects in a GxP environment", domain + " projects",
-    )).eligible
+    assert not result(
+        "Project Coordinator",
+        PM_BODY.replace(
+            "biotechnology projects in a GxP environment",
+            domain + " projects",
+        ),
+    ).eligible
 
 
-@pytest.mark.parametrize("suffix", [
-    "Software", "Construction", "Marketing", "Engineering", "Statistical Programming", "QC",
-])
+@pytest.mark.parametrize(
+    "suffix",
+    [
+        "Software",
+        "Construction",
+        "Marketing",
+        "Engineering",
+        "Statistical Programming",
+        "QC",
+    ],
+)
 def test_transferable_pm_excludes_unrelated_title_context(suffix):
     assert not result("Project Coordinator - " + suffix, PM_BODY).eligible
 
 
-@pytest.mark.parametrize("boilerplate", [
-    "We are a biotechnology company developing innovative therapies.",
-    "Our company develops biotechnology projects and supports GMP operations.",
-    "Develop biotechnology projects at our company with a global team.",
-    "Biotechnology. GMP. Scientific operations. Regulated research.",
-])
+@pytest.mark.parametrize(
+    "boilerplate",
+    [
+        "We are a biotechnology company developing innovative therapies.",
+        "Our company develops biotechnology projects and supports GMP operations.",
+        "Develop biotechnology projects at our company with a global team.",
+        "Biotechnology. GMP. Scientific operations. Regulated research.",
+    ],
+)
 def test_transferable_pm_rejects_unrelated_work_with_domain_boilerplate(boilerplate):
     body = (
         "Coordinate software releases. Maintain software project timelines. "
@@ -267,17 +397,20 @@ def test_transferable_pm_rejects_unrelated_work_with_domain_boilerplate(boilerpl
     assert not result("Project Coordinator", body).eligible
 
 
-@pytest.mark.parametrize("body", [
-    "Biotechnology project management includes timelines, stakeholder coordination "
-    "and status reporting.",
-    "Support biotechnology projects. Management of timelines, stakeholder coordination "
-    "and status reporting.",
-    "Support biotechnology projects. Tracking timelines, stakeholder coordination and "
-    "status reporting is an important concept.",
-    "Support biotechnology projects. Reporting timelines, stakeholder coordination and "
-    "status reporting involves several skills.",
-    "Support biotechnology projects. Coordination, planning, tracking and reporting.",
-])
+@pytest.mark.parametrize(
+    "body",
+    [
+        "Biotechnology project management includes timelines, stakeholder coordination "
+        "and status reporting.",
+        "Support biotechnology projects. Management of timelines, stakeholder coordination "
+        "and status reporting.",
+        "Support biotechnology projects. Tracking timelines, stakeholder coordination and "
+        "status reporting is an important concept.",
+        "Support biotechnology projects. Reporting timelines, stakeholder coordination and "
+        "status reporting involves several skills.",
+        "Support biotechnology projects. Coordination, planning, tracking and reporting.",
+    ],
+)
 def test_transferable_pm_rejects_noun_only_responsibilities(body):
     assert not _transferable_pm_evidence("Project Coordinator", body)
     assert not result("Project Coordinator", body).eligible
@@ -291,20 +424,25 @@ def test_transferable_pm_affirmative_action_inflections(action):
         "Tracks actions/risks and reports project status."
     )
     assert _transferable_pm_evidence("Project Coordinator", body) == {
-        "planning_schedule", "coordination_stakeholders", "tracking_governance",
+        "planning_schedule",
+        "coordination_stakeholders",
+        "tracking_governance",
     }
     assert result("Project Coordinator", body).eligible
 
 
-@pytest.mark.parametrize("context", [
-    "Coordinate pharma development projects.",
-    "Manage GMP validation projects.",
-    "Support GxP operations projects.",
-    "Coordinate laboratory operations projects.",
-    "Coordinate scientific operations projects.",
-    "Manage regulated research deliverables.",
-    "Support clinical quality operations projects.",
-])
+@pytest.mark.parametrize(
+    "context",
+    [
+        "Coordinate pharma development projects.",
+        "Manage GMP validation projects.",
+        "Support GxP operations projects.",
+        "Coordinate laboratory operations projects.",
+        "Coordinate scientific operations projects.",
+        "Manage regulated research deliverables.",
+        "Support clinical quality operations projects.",
+    ],
+)
 def test_transferable_pm_work_context_can_ground_separate_duties(context):
     body = context + (
         " Develop and maintain project timelines. Coordinate cross-functional teams. "

@@ -33,19 +33,25 @@ async def test_bausch_successfactors_pagination_normalization_and_status():
     company = COMPANY.model_copy(deep=True)
     company.ats_config["page_size"] = 2
     first = listing("Clinical Trial Associate", "1365623757", "USA - Remote, US", "Sep 28, 2026")
-    second = listing("Research Operations Coordinator", "1365623758", "US-NY-Rochester, US", "Sep 27, 2026")
+    second = listing(
+        "Research Operations Coordinator", "1365623758", "US-NY-Rochester, US", "Sep 27, 2026"
+    )
     page1 = respx.get(SEARCH, params__contains={"startrow": "0"}).mock(
         return_value=httpx.Response(200, text=first + second)
     )
     page2 = respx.get(SEARCH, params__contains={"startrow": "2"}).mock(
         return_value=httpx.Response(200, text="<html><body>No results</body></html>")
     )
-    detail1 = respx.get("https://careers.bauschlomb.com/job/Clinical-Trial-Associate/1365623757/").respond(
+    detail1 = respx.get(
+        "https://careers.bauschlomb.com/job/Clinical-Trial-Associate/1365623757/"
+    ).respond(
         200,
         text="<h1>Clinical Trial Associate</h1><div id='jobDescription'>Study operations</div>"
         "<a href='/talentcommunity/apply/1365623757/?locale=en_US'>Apply now »</a>",
     )
-    detail2 = respx.get("https://careers.bauschlomb.com/job/Research-Operations-Coordinator/1365623758/").respond(
+    detail2 = respx.get(
+        "https://careers.bauschlomb.com/job/Research-Operations-Coordinator/1365623758/"
+    ).respond(
         200,
         text="<h1>Research Operations Coordinator</h1><div id='jobDescription'>Research operations</div>"
         "<a href='#'>Apply now</a>",
@@ -72,11 +78,13 @@ async def test_successfactors_explicit_closed_and_missing_detail_are_conservativ
     company.ats_config["page_size"] = 1
     page1 = listing("Clinical Trial Associate", "111", "USA - Remote, US", "Sep 28, 2026")
     page2 = listing("Study Operations Specialist", "222", "US-FL-Tampa, US", "Sep 28, 2026")
-    respx.get(SEARCH).mock(side_effect=[
-        httpx.Response(200, text=page1),
-        httpx.Response(200, text=page2),
-        httpx.Response(200, text="<html>No jobs</html>"),
-    ])
+    respx.get(SEARCH).mock(
+        side_effect=[
+            httpx.Response(200, text=page1),
+            httpx.Response(200, text=page2),
+            httpx.Response(200, text="<html>No jobs</html>"),
+        ]
+    )
     respx.get("https://careers.bauschlomb.com/job/Clinical-Trial-Associate/111/").respond(
         200,
         text="<h1>Clinical Trial Associate</h1><p>The job posting is no longer active.</p>"

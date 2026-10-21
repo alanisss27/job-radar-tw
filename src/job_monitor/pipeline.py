@@ -288,18 +288,32 @@ async def run_clinical_title_backfill(
     marker_key = f"clinical-title-backfill-v57547c6-{target_run_key}"
     claim = storage.claim_run(marker_key)
     if claim is None:
-        return {"status": "already_completed_or_running", "jobs_re_evaluated": 0,
-                "newly_recovered_matches": 0, "actionable_candidates": 0,
-                "active": 0, "inactive": 0, "unknown": 0}
+        return {
+            "status": "already_completed_or_running",
+            "jobs_re_evaluated": 0,
+            "newly_recovered_matches": 0,
+            "actionable_candidates": 0,
+            "active": 0,
+            "inactive": 0,
+            "unknown": 0,
+        }
 
-    counters = {"jobs_re_evaluated": 0, "newly_recovered_matches": 0,
-                "actionable_candidates": 0, "active": 0, "inactive": 0, "unknown": 0}
+    counters = {
+        "jobs_re_evaluated": 0,
+        "newly_recovered_matches": 0,
+        "actionable_candidates": 0,
+        "active": 0,
+        "inactive": 0,
+        "unknown": 0,
+    }
     recovered_titles: list[str] = []
     errors: list[dict[str, str]] = []
     try:
         company_by_id: dict[str, CompanyConfig] = {}
         selected_companies = [company for company in companies if profile_name in company.profiles]
-        company_ids = storage.company_ids_for_slugs({company.slug for company in selected_companies})
+        company_ids = storage.company_ids_for_slugs(
+            {company.slug for company in selected_companies}
+        )
         company_by_id = {
             company_id: company
             for company in selected_companies
@@ -314,7 +328,8 @@ async def run_clinical_title_backfill(
         )
         timeout = httpx.Timeout(settings.request_timeout_seconds)
         async with httpx.AsyncClient(
-            timeout=timeout, follow_redirects=True,
+            timeout=timeout,
+            follow_redirects=True,
             headers={"User-Agent": "JobRadarTW/0.1"},
         ) as client:
             active_status_cache: dict[str, ActiveStatus] = {}
@@ -324,14 +339,20 @@ async def run_clinical_title_backfill(
                 company = company_by_id[row["company_id"]]
                 parsed = parse_job(raw)
                 result = match_job(
-                    parsed, profiles[profile_name], preferences, resume,
+                    parsed,
+                    profiles[profile_name],
+                    preferences,
+                    resume,
                     visa_sponsorship_required=settings.visa_sponsorship_required,
                     company_visa_support=company.visa_support,
-                    candidate=candidate, company_ndx_member=company.ndx_member,
+                    candidate=candidate,
+                    company_ndx_member=company.ndx_member,
                 )
                 storage.record_match(
-                    row["job_id"], profiles[profile_name].version,
-                    row["content_hash"], result,
+                    row["job_id"],
+                    profiles[profile_name].version,
+                    row["content_hash"],
+                    result,
                 )
                 if (
                     not result.notification_eligible
@@ -350,15 +371,21 @@ async def run_clinical_title_backfill(
                 if not notification_status_allows(status):
                     continue
                 message = render_job_message(
-                    company.name, parsed, result, datetime.now(UTC),
+                    company.name,
+                    parsed,
+                    result,
+                    datetime.now(UTC),
                     display_timezone=settings.monitor_timezone,
                 )
                 label = manual_verification_label(status)
                 if label:
                     message += "\n\n" + label
                 if storage.queue_notification(
-                    row["job_id"], profile_name, row["content_hash"],
-                    result.score, message,
+                    row["job_id"],
+                    profile_name,
+                    row["content_hash"],
+                    result.score,
+                    message,
                 ):
                     counters["actionable_candidates"] += 1
         storage.finish_run(claim.run_id, counters, errors)
@@ -562,7 +589,9 @@ async def run_pipeline(
                             # These sources hash listing fields for stable change detection;
                             # recompute the plan so the hydrated payload is still persisted.
                             plan = (
-                                storage.plan_job_from_index(raw, job_index.get(raw.stable_external_id))
+                                storage.plan_job_from_index(
+                                    raw, job_index.get(raw.stable_external_id)
+                                )
                                 if use_batch
                                 else storage.plan_job(company_id, raw)
                                 if storage
@@ -669,7 +698,9 @@ async def run_pipeline(
                     report.jobs_new += int(plan.is_new)
                     report.jobs_changed += int(plan.changed and not plan.is_new)
                     report.matches += sum(m.result.notification_eligible for m in eligible_matches)
-                    report.eligibility_reviews += sum(m.result.needs_eligibility_review for m in eligible_matches)
+                    report.eligibility_reviews += sum(
+                        m.result.needs_eligibility_review for m in eligible_matches
+                    )
                     report.matched_jobs.extend(eligible_matches)
                     if dry_run:
                         report.dry_run_matches.extend(eligible_matches)
@@ -698,9 +729,13 @@ async def run_pipeline(
             if notifier and storage:
                 pending_before_delivery = storage.pending_notification_count()
                 queued = storage.claim_pending_notifications(
-                    run_id, settings.immediate_notification_max_per_run,
-                    **({"eligibility_check": lambda raw: candidate_rejections(raw, preferences)}
-                       if preferences.candidate_eligibility is not None else {}),
+                    run_id,
+                    settings.immediate_notification_max_per_run,
+                    **(
+                        {"eligibility_check": lambda raw: candidate_rejections(raw, preferences)}
+                        if preferences.candidate_eligibility is not None
+                        else {}
+                    ),
                 )
                 report.notifications_suppressed = max(
                     0,
@@ -714,8 +749,9 @@ async def run_pipeline(
                     )
                     if preferences.candidate_eligibility is not None:
                         rejected = (
-                            candidate_rejections(raw, preferences) if raw else
-                            ["eligibility_unknown: queued posting payload unavailable"]
+                            candidate_rejections(raw, preferences)
+                            if raw
+                            else ["eligibility_unknown: queued posting payload unavailable"]
                         )
                         if rejected:
                             storage.release_notification_claim(
@@ -723,15 +759,16 @@ async def run_pipeline(
                             )
                             continue
                     if raw is not None:
-                        status = await verify_if_actionable(
-                            True, raw, client, active_status_cache
-                        )
+                        status = await verify_if_actionable(True, raw, client, active_status_cache)
                         if status is ActiveStatus.INACTIVE:
                             storage.suppress_notification_claim(
                                 run_id, item["id"], item["claim_token"]
                             )
                             continue
-                        if status is ActiveStatus.UNKNOWN and manual_verification_label(status) not in item["message"]:
+                        if (
+                            status is ActiveStatus.UNKNOWN
+                            and manual_verification_label(status) not in item["message"]
+                        ):
                             item["message"] += "\n\n" + manual_verification_label(status)
                     elif preferences.candidate_eligibility is None:
                         item["message"] += (

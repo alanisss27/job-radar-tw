@@ -152,9 +152,7 @@ def test_clinical_title_backfill_inventory_is_limited_to_target_run_and_open_job
     posting = raw_job("open")
     open_plan = db.plan_job(clinical_id, posting)
     db.persist_job_decisions(clinical_id, run_id, posting, open_plan, [])
-    prior = MatchResult(
-        profile="clinical-discovery", score=0.2, eligible=False, tier="reject"
-    )
+    prior = MatchResult(profile="clinical-discovery", score=0.2, eligible=False, tier="reject")
     db.record_match(open_plan.job_id, "1.3", posting.content_hash, prior)
     closed = raw_job("closed")
     closed_plan = db.plan_job(clinical_id, closed)
@@ -185,27 +183,32 @@ def test_clinical_backfill_report_reads_only_recorded_recovered_matches(tmp_path
         "1.4",
         posting.content_hash,
         MatchResult(
-            profile="clinical-discovery", score=0.86, eligible=True,
-            tier="strong", bucket="target",
+            profile="clinical-discovery",
+            score=0.86,
+            eligible=True,
+            tier="strong",
+            bucket="target",
         ),
     )
     db.finish_run(marker_id, {"newly_recovered_matches": 1}, [])
 
     report = db.clinical_backfill_report("manual-36363009458-1")
-    assert report["candidates"] == [{
-        "company": "Acme",
-        "title": "Data Analyst recovered",
-        "location": "Phoenix, AZ",
-        "remote_status": "not stated as remote",
-        "active_status": "unknown",
-        "official_url": "https://example.com/jobs/recovered",
-        "score": 0.86,
-        "disposition": "strong / target",
-        "applied": False,
-        "notified": False,
-        "previously_matched": False,
-        "currently_matched": True,
-    }]
+    assert report["candidates"] == [
+        {
+            "company": "Acme",
+            "title": "Data Analyst recovered",
+            "location": "Phoenix, AZ",
+            "remote_status": "not stated as remote",
+            "active_status": "unknown",
+            "official_url": "https://example.com/jobs/recovered",
+            "score": 0.86,
+            "disposition": "strong / target",
+            "applied": False,
+            "notified": False,
+            "previously_matched": False,
+            "currently_matched": True,
+        }
+    ]
 
 
 def test_stale_running_run_can_be_reclaimed(tmp_path):

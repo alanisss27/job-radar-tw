@@ -11,8 +11,7 @@ from job_monitor.sources import CharterResearchSource, SOURCE_CLASSES, SourceRun
 
 
 COMPANY = next(
-    item for item in load_companies(Path("config/companies.yml"))
-    if item.slug == "charter-research"
+    item for item in load_companies(Path("config/companies.yml")) if item.slug == "charter-research"
 )
 LISTING = "https://www.charterresearch.com/open-roles/"
 
@@ -28,9 +27,13 @@ async def test_charter_listing_retrieves_and_deduplicates_without_detail_fetch()
     detail_url = "https://www.charterresearch.com/careers/job/637997130"
     listing = respx.get(LISTING).respond(
         200,
-        text=("<table>" + row("637997130", "Regulatory Associate", "Orlando")
-              + row("621235456", "Clinical Research Coordinator", "Orlando")
-              + row("637997130", "Regulatory Associate", "Orlando") + "</table>"),
+        text=(
+            "<table>"
+            + row("637997130", "Regulatory Associate", "Orlando")
+            + row("621235456", "Clinical Research Coordinator", "Orlando")
+            + row("637997130", "Regulatory Associate", "Orlando")
+            + "</table>"
+        ),
     )
     detail = respx.get(detail_url).mock(return_value=httpx.Response(200))
 

@@ -109,7 +109,9 @@ def contextual_title_evidence(
                 "clinical_data_operations",
             } and not _OPERATIONS_EVIDENCE.search(context):
                 continue
-            if family == "biosample_biomarker_operations" and not _OPERATIONS_EVIDENCE.search(context):
+            if family == "biosample_biomarker_operations" and not _OPERATIONS_EVIDENCE.search(
+                context
+            ):
                 continue
             hits.add(f"{family}: {term}")
     return hits

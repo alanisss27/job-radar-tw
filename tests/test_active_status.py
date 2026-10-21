@@ -29,7 +29,9 @@ def raw(*, metadata=None, posted_at=None):
 
 
 def test_workday_can_apply_false_is_inactive():
-    assert structured_status({"active_status_evidence": {"canApply": False}}) is ActiveStatus.INACTIVE
+    assert (
+        structured_status({"active_status_evidence": {"canApply": False}}) is ActiveStatus.INACTIVE
+    )
 
 
 @pytest.mark.parametrize(
@@ -74,7 +76,10 @@ def test_reliable_apply_evidence_is_active(evidence):
 @pytest.mark.parametrize(
     ("body", "expected"),
     [
-        ("<html><h1>Clinical Project Coordinator</h1><p>Job description</p></html>", ActiveStatus.UNKNOWN),
+        (
+            "<html><h1>Clinical Project Coordinator</h1><p>Job description</p></html>",
+            ActiveStatus.UNKNOWN,
+        ),
         ("<html><p>This job posting is no longer active.</p></html>", ActiveStatus.INACTIVE),
         ("<html><button>Apply now</button></html>", ActiveStatus.ACTIVE),
         ("<html><button disabled>Apply</button></html>", ActiveStatus.INACTIVE),
@@ -95,10 +100,12 @@ async def test_workday_unknown_can_still_become_inactive_on_explicit_closure():
     async def handler(request):
         return httpx.Response(200, text="<p>This job posting is no longer active.</p>")
 
-    job = raw(metadata={
-        "workday": {"externalPath": "/job/123"},
-        "active_status_evidence": {"posted": True, "canApply": True},
-    })
+    job = raw(
+        metadata={
+            "workday": {"externalPath": "/job/123"},
+            "active_status_evidence": {"posted": True, "canApply": True},
+        }
+    )
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         assert await verify_active_status(job, client, {}) is ActiveStatus.INACTIVE
 
@@ -108,7 +115,7 @@ def test_old_posting_age_is_informational_when_apply_evidence_exists():
         metadata={"active_status_evidence": {"apply_url": "https://apply.example.test/123"}},
         posted_at=datetime(2020, 1, 1, tzinfo=UTC),
     )
-    result = MatchResult(profile=ProfileName.HEALTHCARE, score=.95, eligible=True, tier="strong")
+    result = MatchResult(profile=ProfileName.HEALTHCARE, score=0.95, eligible=True, tier="strong")
     assert _qualifies_for_immediate_notification(
         ParsedJob(raw=job), result, datetime(2026, 1, 1, tzinfo=UTC), Settings(), is_new=True
     )
@@ -116,10 +123,12 @@ def test_old_posting_age_is_informational_when_apply_evidence_exists():
 
 
 def test_unknown_retains_candidate_with_manual_verification_label():
-    job_status = structured_status({
-        "workday": {},
-        "active_status_evidence": {"posted": True, "canApply": True},
-    })
+    job_status = structured_status(
+        {
+            "workday": {},
+            "active_status_evidence": {"posted": True, "canApply": True},
+        }
+    )
     assert job_status is ActiveStatus.UNKNOWN
     assert notification_status_allows(job_status)
     assert manual_verification_label(ActiveStatus.UNKNOWN) == (
@@ -136,10 +145,16 @@ def test_summary_labels_unknown_and_hides_inactive_postings():
     inactive = raw(metadata={"active_status": "inactive"}).model_copy(
         update={"title": "Closed Project Coordinator"}
     )
-    result = MatchResult(profile=ProfileName.HEALTHCARE, score=.9, eligible=True, tier="strong")
+    result = MatchResult(profile=ProfileName.HEALTHCARE, score=0.9, eligible=True, tier="strong")
     matches = [
-        MatchedJob(company_name="Acme", job=ParsedJob(raw=job), result=result,
-                   first_seen_at=datetime.now(UTC), is_new=True, changed=False)
+        MatchedJob(
+            company_name="Acme",
+            job=ParsedJob(raw=job),
+            result=result,
+            first_seen_at=datetime.now(UTC),
+            is_new=True,
+            changed=False,
+        )
         for job in (active_unknown, inactive)
     ]
     summary = render_run_summary(
@@ -159,7 +174,9 @@ async def test_status_verification_is_skipped_before_actionable_gate(monkeypatch
         return ActiveStatus.ACTIVE
 
     monkeypatch.setattr("job_monitor.active_status.verify_active_status", verify)
-    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200))) as client:
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda r: httpx.Response(200))
+    ) as client:
         result = await verify_if_actionable(False, raw(), client, {})
     assert result is None
     assert not called
