@@ -104,12 +104,29 @@ class RunReport:
     zero_job_sources: list[str] = field(default_factory=list)
     skipped_reason: str | None = None
     diagnostics: dict | None = None
+    scan_outcome: str = "scan_failed"
+    schedule: dict[str, str] | None = None
 
     def stats(self) -> dict:
         stats = {key: value for key, value in self.__dict__.items() if isinstance(value, int)}
+        stats["scan_outcome"] = self.scan_outcome
+        if self.schedule is not None:
+            stats["schedule"] = self.schedule
         if self.diagnostics is not None:
             stats["decision_diagnostics"] = self.diagnostics
         return stats
+
+    def scan_status(self) -> dict:
+        """Compact invocation diagnostics; never imply these are prior-run totals."""
+        return {
+            "scan_outcome": self.scan_outcome,
+            "run_key": self.run_key,
+            "schedule": self.schedule,
+            "count_scope": "current_invocation",
+            "sources_attempted": self.sources_attempted,
+            "sources_succeeded": self.sources_succeeded,
+            "individual_notifications_sent": self.notifications,
+        }
 
 
 @dataclass
@@ -408,9 +425,11 @@ async def run_pipeline(
     suppress_notifications: bool = False,
     run_key: str | None = None,
     scheduled: bool = False,
+    report: RunReport | None = None,
 ) -> RunReport:
     key = run_key or local_run_key(timezone=settings.monitor_timezone)
-    report = RunReport(run_key=key)
+    report = report if report is not None else RunReport(run_key=key)
+    report.run_key = key
     diagnostics = DecisionDiagnostics()
     diagnostics_complete = False
     if not dry_run and not settings.database_url:
@@ -425,6 +444,7 @@ async def run_pipeline(
         claim = storage.claim_run(key, **({"stale_after_minutes": 120} if scheduled else {}))
         if claim is None:
             report.skipped_reason = "duplicate_run_key"
+            report.scan_outcome = "skipped_daily_claim_unavailable"
             logger.warning("Run %s already completed or is in progress; skipping fetch", key)
             return report
         run_id = claim.run_id
@@ -723,6 +743,13 @@ async def run_pipeline(
                     )
                 report.sources_succeeded += 1
 
+            report.scan_outcome = (
+                "scan_completed"
+                if report.sources_attempted and report.sources_succeeded == report.sources_attempted
+                else "scan_partial"
+                if report.sources_succeeded
+                else "scan_failed"
+            )
             if notifier and scheduled:
                 await asyncio.sleep(notification_delay(timezone=settings.monitor_timezone))
 
@@ -832,6 +859,8 @@ async def run_pipeline(
                     context="daily summary",
                 )
     except BaseException as exc:
+        if report.scan_outcome == "scan_failed" and report.sources_succeeded:
+            report.scan_outcome = "scan_partial"
         report.errors.append({"company": "pipeline", "error": _safe_error(exc, settings)})
         raise
     finally:

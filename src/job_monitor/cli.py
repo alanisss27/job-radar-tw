@@ -27,7 +27,7 @@ from .onboarding import (
 )
 from .pipeline import RunReport, run_clinical_title_backfill, run_pipeline
 from .resume import load_resume
-from .schedule import scheduled_run_key
+from .schedule import local_run_key, schedule_decision, scheduled_run_key
 from .storage import Storage
 
 app = typer.Typer(no_args_is_help=True, help="Job Radar TW official career-site monitor")
@@ -58,11 +58,13 @@ def _load(selected: str | None = None):
     return settings, companies, profiles, preferences, candidate
 
 
-def _print_report(report) -> None:
+def _print_report(report, status_file: Path | None = None) -> None:
     payload = {"run_key": report.run_key, **report.stats(), "errors": report.errors}
     if report.skipped_reason:
         payload["skipped_reason"] = report.skipped_reason
     typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+    if status_file is not None:
+        status_file.write_text(json.dumps(report.scan_status(), indent=2), encoding="utf-8")
 
 
 def _selected_slugs(company: list[str] | None) -> set[str] | None:
@@ -96,6 +98,7 @@ def run_command(
         help="Use the configured schedule window and daily idempotency key",
     ),
     run_key: str | None = typer.Option(None, help="Override idempotency key"),
+    status_file: Path | None = typer.Option(None, help="Write compact scan outcome JSON"),
 ) -> None:
     """Run the monitor and persist results."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -106,17 +109,30 @@ def run_command(
         raise typer.BadParameter(
             f"{company} is disabled; verify and enable it before a persisted run"
         )
+    decision = None
+    if scheduled:
+        now = datetime.now(UTC)
+        decision = schedule_decision(
+            now,
+            timezone=settings.monitor_timezone,
+            hour=settings.monitor_hour,
+            grace_hours=settings.schedule_grace_hours,
+        )
     if scheduled and run_key is None:
         run_key = scheduled_run_key(
+            now,
             timezone=settings.monitor_timezone,
             hour=settings.monitor_hour,
             grace_hours=settings.schedule_grace_hours,
         )
         if run_key is None:
             report = RunReport(
-                run_key="scheduled-outside-window", skipped_reason="outside_scheduled_window"
+                run_key="scheduled-outside-window",
+                scan_outcome="skipped_outside_window",
+                schedule=decision,
+                skipped_reason="outside_scheduled_window",
             )
-            _print_report(report)
+            _print_report(report, status_file)
             raise typer.Exit()
     if not suppress_notifications and not (
         settings.telegram_bot_token and settings.telegram_chat_id
@@ -124,20 +140,28 @@ def run_command(
         raise typer.BadParameter(
             "TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are required for monitor run notifications"
         )
-    report = asyncio.run(
-        run_pipeline(
-            settings,
-            companies,
-            profiles,
-            preferences,
-            candidate,
-            backfill=backfill,
-            suppress_notifications=suppress_notifications,
-            run_key=run_key,
-            scheduled=scheduled,
-        )
+    report = RunReport(
+        run_key=run_key or local_run_key(timezone=settings.monitor_timezone), schedule=decision
     )
-    _print_report(report)
+    try:
+        report = asyncio.run(
+            run_pipeline(
+                settings,
+                companies,
+                profiles,
+                preferences,
+                candidate,
+                backfill=backfill,
+                suppress_notifications=suppress_notifications,
+                run_key=run_key,
+                scheduled=scheduled,
+                report=report,
+            )
+        )
+    except BaseException:
+        _print_report(report, status_file)
+        raise
+    _print_report(report, status_file)
     if report.skipped_reason:
         raise typer.Exit()
     if any(item.get("company") == "telegram" for item in report.errors):
