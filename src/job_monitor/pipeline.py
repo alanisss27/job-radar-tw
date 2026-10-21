@@ -17,6 +17,8 @@ from .active_status import (
 from .config import CandidateProfile, ProfileConfig, SearchPreferences, Settings
 from .llm import LLMEnricher
 from .matching import match_job, parse_job
+from .discovery import contextual_title_candidates
+from .clinical_support import quality_support_evidence, quality_support_title
 from .eligibility import candidate_rejections
 from .diagnostics import DecisionDiagnostics
 from .transferable_operations import PROFILE as OPERATIONS_PROFILE
@@ -43,18 +45,24 @@ def _supports_batch_persistence(storage: Storage) -> bool:
     )
 
 
-def _potential_city_of_hope_candidate(results: list[MatchResult]) -> bool:
-    return any(
+def _potential_city_of_hope_candidate(
+    results: list[MatchResult], *, raw: RawJob | None = None, profile: ProfileConfig | None = None
+) -> bool:
+    existing = any(
         result.eligible
         or result.discovery_eligible
         or result.needs_eligibility_review
         or (
             result.profile == OPERATIONS_PROFILE
-            and result.filtered_reason
-            in {
-                "operations_duties_insufficient",
-                "operations_transferability_unverified",
-            }
+            and (
+                result.filtered_reason
+                in {
+                    "operations_duties_insufficient",
+                    "operations_transferability_unverified",
+                }
+                or result.filtered_reason == "operations_clinical_context_missing"
+                and not (result.candidate_eligibility and result.candidate_eligibility.hard_reasons)
+            )
         )
         or any(
             reason.startswith(
@@ -72,6 +80,31 @@ def _potential_city_of_hope_candidate(results: list[MatchResult]) -> bool:
         )
         for result in results
     )
+    if existing:
+        return True
+    if raw is None or profile is None:
+        return False
+    clinical = next((r for r in results if r.profile == "clinical-discovery"), None)
+    if (
+        clinical is None
+        or clinical.filtered_reason
+        in {
+            "citizenship_or_clearance",
+            "visa_sponsorship",
+            "seniority",
+            "level_reach",
+            "reach",
+        }
+        or clinical.candidate_eligibility
+        and clinical.candidate_eligibility.hard_reasons
+    ):
+        return False
+    if quality_support_title(raw.title):
+        return quality_support_evidence(raw.title, raw.description_raw).rejection in {
+            None,
+            "clinical_quality_context_missing",
+        }
+    return bool(contextual_title_candidates(raw.title, profile.contextual_title_families))
 
 
 def _discovery_profiles(company: CompanyConfig, profiles: dict) -> list[str]:
@@ -602,7 +635,13 @@ async def run_pipeline(
                             )
                             for profile_name in _discovery_profiles(company, profiles)
                         ]
-                        potential = _potential_city_of_hope_candidate(preliminary)
+                        potential = _potential_city_of_hope_candidate(
+                            preliminary,
+                            raw=raw,
+                            profile=profiles.get("clinical-discovery")
+                            if "clinical-discovery" in company.profiles
+                            else None,
+                        )
                         if potential:
                             raw = await runner.hydrate_candidate(company, raw)
                             parsed = parse_job(raw)

@@ -5,6 +5,8 @@ from __future__ import annotations
 import html
 import re
 
+from .clinical_support import clinical_alias_title, clinical_work_clauses
+
 
 def _normalize(value: str) -> str:
     value = html.unescape(value).casefold()
@@ -60,6 +62,23 @@ _OPERATIONS_EVIDENCE = re.compile(
 )
 
 
+def contextual_title_candidates(title: str, families: dict[str, list[str]]) -> set[str]:
+    """Title-only permission to retrieve a JD, never permission to match or alert."""
+    title = _normalize(title)
+    if _TITLE_EXCLUSIONS.search(title):
+        return set()
+    return {
+        f"{family}: {term}"
+        for family, terms in families.items()
+        for term in terms
+        if family != "clinical_support_aliases" or clinical_alias_title(title)
+        if re.fullmatch(
+            re.escape(_normalize(term)) + r"(?:\s+(?:i{1,3}|iv|[1-4]))?(?:\s*[-,(].*)?",
+            title,
+        )
+    }
+
+
 def contextual_title_evidence(
     title: str, description: str, families: dict[str, list[str]]
 ) -> set[str]:
@@ -98,6 +117,10 @@ def contextual_title_evidence(
         for term in terms:
             pattern = re.escape(_normalize(term)) + r"(?:\s+(?:i{1,3}|iv|[1-4]))?(?:\s*[-,(].*)?"
             if not re.fullmatch(pattern, title):
+                continue
+            if family == "clinical_support_aliases" and (
+                not clinical_alias_title(title) or not clinical_work_clauses(description)
+            ):
                 continue
             if family == "study_regulatory" and not _STUDY_WORK.search(context):
                 continue

@@ -1,0 +1,31 @@
+{
+  "provenance": "Synthetic requirements-only fixtures; not real postings or candidate evidence.",
+  "p2": [
+    {"title": "Clinical Trials Associate", "description": "Maintain clinical trial documentation and study logs. Coordinate clinical study team updates.", "pass": true},
+    {"title": "Site Start-Up Specialist", "description": "Coordinate clinical trial site activation. Maintain study documentation.", "pass": true},
+    {"title": "Clinical Trials Associate II", "description": "Maintain clinical trial documentation. Track study timelines.", "pass": true},
+    {"title": "Clinical Trials Associate", "description": "Our company develops clinical trials. General office administration.", "pass": false},
+    {"title": "Site Start-Up Specialist", "description": "Coordinate construction projects. Maintain project plans and project milestones.", "pass": false},
+    {"title": "Site Start-Up Specialist", "description": "Experience coordinating clinical trial site activation is preferred.", "pass": false}
+  ],
+  "p3": [
+    {"title": "Clinical Quality Specialist", "description": "Support GCP audit documentation for clinical trials. Maintain study quality records.", "pass": true},
+    {"title": "GCP Quality Coordinator", "description": "Review GCP study documentation. Track inspection action items.", "pass": true},
+    {"title": "TMF Specialist", "description": "Maintain trial master files for sponsor studies. Review essential trial documents.", "pass": true},
+    {"title": "eTMF Support Coordinator II", "description": "Reconcile eTMF records. Archive study documentation for the CRO.", "pass": true},
+    {"title": "Clinical Quality Assurance Coordinator", "description": "Support clinical study inspection documentation and CAPA tracking.", "pass": true},
+    {"title": "Clinical Quality Specialist", "description": "Review manufacturing batch release records. Support GMP quality operations.", "pass": false},
+    {"title": "Clinical Quality Specialist", "description": "Review laboratory QC results. Maintain laboratory testing records.", "pass": false},
+    {"title": "eTMF Specialist", "description": "Implement software platforms and API integrations. Maintain project plans.", "pass": false},
+    {"title": "TMF Specialist", "description": "Our company provides clinical trial services. Manage calendars and payroll.", "pass": false},
+    {"title": "GCP Quality Specialist", "description": "Support GCP audit documentation. CQA certification is required.", "pass": false},
+    {"title": "Clinical Quality Specialist", "description": "Support GCP study documentation. Required qualifications:\nRN license.", "pass": false},
+    {"title": "Clinical Quality Specialist", "description": "Experience in clinical trials and GCP preferred.", "pass": false},
+    {"title": "TMF Quality Specialist", "description": "Review eTMF documents and study documentation.", "pass": true},
+    {"title": "eTMF Specialist", "description": "Maintain trial master files. Implement software platforms and API integrations.", "pass": false},
+    {"title": "Clinical Quality Specialist", "description": "Maintain GCP study documentation. Required qualifications:\nEngineering degree.", "pass": false},
+    {"title": "Clinical Quality Coordinator", "description": "Coordinate CRO calendars and general meetings.", "pass": false},
+    {"title": "Clinical Quality Coordinator", "description": "Maintain CRO financial records and invoices.", "pass": false},
+    {"title": "TMF Specialist", "description": "Maintain certification records required by the sponsor in the trial master file.", "pass": true}
+  ]
+}
