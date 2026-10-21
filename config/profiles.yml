@@ -1,4 +1,16 @@
 profiles:
+  - name: transferable-operations
+    version: "1.0"
+    # Duties and bounded titles are enforced in matching; qualification review
+    # is mandatory because general transferable experience is not verified.
+    threshold: 0.70
+    strong_threshold: 0.90
+    allow_other_job_family: true
+    weights: {title: 1.0}
+    title_terms: []
+    domain_terms: []
+    skills: []
+
   - name: clinical-discovery
     version: "1.3"
     # Assign only to relevant healthcare/life-science employers.

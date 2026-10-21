@@ -39,34 +39,78 @@ def test_official_broad_configuration():
     assert PROFILE.responsibility_min_hits == 2
 
 
-@pytest.mark.parametrize("label", [
-    "TARRYTOWN", "SLEEPY HOLLOW", "Armonk", "Warren", "Cambridge", "Hawthorne",
-    "Los Angeles", "Seattle", "Saratoga Springs", "Washington DC", "RENSSELAER",
-    "RENSS - GLOBAL VIEW", "RENSS - BLD17 Filling", "RENSS - MENANDS", "RENSS - SUNY",
-    "RENSS - TECH VALLEY", "RENSS - TEMPEL LN", "Tampa, FL", "Albany, NY",
-    "Remote - United States", "Remote - Florida", "Remote - North Dakota", "Honolulu, HI",
-])
+@pytest.mark.parametrize(
+    "label",
+    [
+        "TARRYTOWN",
+        "SLEEPY HOLLOW",
+        "Armonk",
+        "Warren",
+        "Cambridge",
+        "Hawthorne",
+        "Los Angeles",
+        "Seattle",
+        "Saratoga Springs",
+        "Washington DC",
+        "RENSSELAER",
+        "RENSS - GLOBAL VIEW",
+        "RENSS - BLD17 Filling",
+        "RENSS - MENANDS",
+        "RENSS - SUNY",
+        "RENSS - TECH VALLEY",
+        "RENSS - TEMPEL LN",
+        "Tampa, FL",
+        "Albany, NY",
+        "Remote - United States",
+        "Remote - Florida",
+        "Remote - North Dakota",
+        "Honolulu, HI",
+    ],
+)
 def test_validated_campuses_and_nationwide_state_labels(label):
     assert PATTERN.search(label)
 
 
-@pytest.mark.parametrize("label", [
-    "Dublin", "Limerick", "Uxbridge1", "Hyderabad", "Toronto", "Tokyo", "Amsterdam3",
-    "Remote - Ireland", "Remote - Germany", "Remote - United Kingdom", "Remote - Italy",
-    "Unknown Campus", "Cambridge, United Kingdom", "Tampa, FL, Canada", "2 Locations",
-])
+@pytest.mark.parametrize(
+    "label",
+    [
+        "Dublin",
+        "Limerick",
+        "Uxbridge1",
+        "Hyderabad",
+        "Toronto",
+        "Tokyo",
+        "Amsterdam3",
+        "Remote - Ireland",
+        "Remote - Germany",
+        "Remote - United Kingdom",
+        "Remote - Italy",
+        "Unknown Campus",
+        "Cambridge, United Kingdom",
+        "Tampa, FL, Canada",
+        "2 Locations",
+    ],
+)
 def test_foreign_and_unknown_labels_are_not_scope_evidence(label):
     assert not PATTERN.search(label)
 
 
 def facets():
-    return [{"facetParameter": "locationMainGroup", "values": [{
-        "facetParameter": "locations", "values": [
-            {"descriptor": "TARRYTOWN", "id": "us-campus-new-id"},
-            {"descriptor": "Remote - United States", "id": "us-remote"},
-            {"descriptor": "Dublin", "id": "foreign"},
-        ],
-    }]}]
+    return [
+        {
+            "facetParameter": "locationMainGroup",
+            "values": [
+                {
+                    "facetParameter": "locations",
+                    "values": [
+                        {"descriptor": "TARRYTOWN", "id": "us-campus-new-id"},
+                        {"descriptor": "Remote - United States", "id": "us-remote"},
+                        {"descriptor": "Dublin", "id": "foreign"},
+                    ],
+                }
+            ],
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -83,21 +127,35 @@ async def test_scoped_pagination_deduplication_and_mixed_primary_locations():
             return httpx.Response(200, json={"facets": facets()})
         assert body["appliedFacets"] == {"locations": ["us-campus-new-id", "us-remote"]}
         indices = [0, 1] if body["offset"] == 0 else [1, 2]
-        return httpx.Response(200, json={"total": 4, "jobPostings": [{
-            "externalPath": f"/job/test/R-{i}", "title": titles[i],
-            "locationsText": "2 Locations", "bulletFields": [f"R-{i}"],
-        } for i in indices]})
+        return httpx.Response(
+            200,
+            json={
+                "total": 4,
+                "jobPostings": [
+                    {
+                        "externalPath": f"/job/test/R-{i}",
+                        "title": titles[i],
+                        "locationsText": "2 Locations",
+                        "bulletFields": [f"R-{i}"],
+                    }
+                    for i in indices
+                ],
+            },
+        )
 
     route = respx.post(cfg.ats_config["endpoint"]).mock(side_effect=listing)
     for i in range(3):
         respx.get(cfg.ats_config["detail_api_base"] + f"/job/test/R-{i}").respond(
-            200, json={"jobPostingInfo": {
-                "location": "Dublin" if i == 1 else "TARRYTOWN",
-                "additionalLocations": ["TARRYTOWN"] if i == 1 else ["Warren"],
-                "country": {"descriptor": "Ireland" if i == 1 else "United States of America"},
-                "jobRequisitionLocation": {"country": {"alpha2Code": "IE" if i == 1 else "US"}},
-                "jobDescription": f"<p>{BODY}</p>",
-            }},
+            200,
+            json={
+                "jobPostingInfo": {
+                    "location": "Dublin" if i == 1 else "TARRYTOWN",
+                    "additionalLocations": ["TARRYTOWN"] if i == 1 else ["Warren"],
+                    "country": {"descriptor": "Ireland" if i == 1 else "United States of America"},
+                    "jobRequisitionLocation": {"country": {"alpha2Code": "IE" if i == 1 else "US"}},
+                    "jobDescription": f"<p>{BODY}</p>",
+                }
+            },
         )
     async with httpx.AsyncClient() as client:
         jobs = await WorkdaySource(cfg, client).fetch()
@@ -126,25 +184,40 @@ async def test_scoped_pagination_deduplication_and_mixed_primary_locations():
 
 @pytest.mark.asyncio
 @respx.mock
-@pytest.mark.parametrize("detail,status", [
-    ({"location": "Dublin", "country": {"descriptor": "United States of America"}}, 200),
-    ({"location": "2 Locations"}, 200),
-    ({"location": "TARRYTOWN", "additionalLocations": "Dublin"}, 200),
-    ({"location": "Cambridge", "country": {"descriptor": "United Kingdom"}}, 200),
-    ({}, 200),
-    ({}, 503),
-])
+@pytest.mark.parametrize(
+    "detail,status",
+    [
+        ({"location": "Dublin", "country": {"descriptor": "United States of America"}}, 200),
+        ({"location": "2 Locations"}, 200),
+        ({"location": "TARRYTOWN", "additionalLocations": "Dublin"}, 200),
+        ({"location": "Cambridge", "country": {"descriptor": "United Kingdom"}}, 200),
+        ({}, 200),
+        ({}, 503),
+    ],
+)
 async def test_ignored_scope_missing_or_failed_details_fail_closed(detail, status, caplog):
     cfg = COMPANY.ats_config
-    respx.post(cfg["endpoint"]).mock(side_effect=[
-        httpx.Response(200, json={"facets": facets()}),
-        httpx.Response(200, json={"total": 1, "jobPostings": [{
-            "externalPath": "/job/R-1", "title": "Clinical Study Specialist",
-            "locationsText": "TARRYTOWN",  # Listing/country alone cannot prove scope.
-        }]}),
-    ])
+    respx.post(cfg["endpoint"]).mock(
+        side_effect=[
+            httpx.Response(200, json={"facets": facets()}),
+            httpx.Response(
+                200,
+                json={
+                    "total": 1,
+                    "jobPostings": [
+                        {
+                            "externalPath": "/job/R-1",
+                            "title": "Clinical Study Specialist",
+                            "locationsText": "TARRYTOWN",  # Listing/country alone cannot prove scope.
+                        }
+                    ],
+                },
+            ),
+        ]
+    )
     respx.get(cfg["detail_api_base"] + "/job/R-1").respond(
-        status, json={"jobPostingInfo": detail},
+        status,
+        json={"jobPostingInfo": detail},
     )
     async with httpx.AsyncClient() as client:
         jobs = await WorkdaySource(COMPANY, client).fetch()
@@ -156,19 +229,31 @@ async def test_ignored_scope_missing_or_failed_details_fail_closed(detail, statu
 @respx.mock
 async def test_persistent_detail_failure_excludes_only_one_regeneron_posting(caplog):
     cfg = COMPANY.ats_config
-    respx.post(cfg["endpoint"]).mock(side_effect=[
-        httpx.Response(200, json={"facets": facets()}),
-        httpx.Response(200, json={"total": 2, "jobPostings": [
-            {"externalPath": "/job/R-good", "title": "Clinical Study Specialist"},
-            {"externalPath": "/job/R-bad", "title": "Clinical Study Associate"},
-        ]}),
-    ])
+    respx.post(cfg["endpoint"]).mock(
+        side_effect=[
+            httpx.Response(200, json={"facets": facets()}),
+            httpx.Response(
+                200,
+                json={
+                    "total": 2,
+                    "jobPostings": [
+                        {"externalPath": "/job/R-good", "title": "Clinical Study Specialist"},
+                        {"externalPath": "/job/R-bad", "title": "Clinical Study Associate"},
+                    ],
+                },
+            ),
+        ]
+    )
     respx.get(cfg["detail_api_base"] + "/job/R-good").respond(
-        200, json={"jobPostingInfo": {
-            "location": "TARRYTOWN", "additionalLocations": [],
-            "country": {"descriptor": "United States of America"},
-            "jobDescription": "<p>Support clinical study team updates.</p>",
-        }},
+        200,
+        json={
+            "jobPostingInfo": {
+                "location": "TARRYTOWN",
+                "additionalLocations": [],
+                "country": {"descriptor": "United States of America"},
+                "jobDescription": "<p>Support clinical study team updates.</p>",
+            }
+        },
     )
     respx.get(cfg["detail_api_base"] + "/job/R-bad").respond(503)
     async with httpx.AsyncClient() as client:
@@ -181,28 +266,43 @@ async def test_persistent_detail_failure_excludes_only_one_regeneron_posting(cap
 @pytest.mark.asyncio
 @respx.mock
 async def test_disappearing_us_facets_never_fall_back_to_global():
-    route = respx.post(COMPANY.ats_config["endpoint"]).respond(200, json={"facets": [{
-        "facetParameter": "locations", "values": [{"descriptor": "Dublin", "id": "ie"}],
-    }]})
+    route = respx.post(COMPANY.ats_config["endpoint"]).respond(
+        200,
+        json={
+            "facets": [
+                {
+                    "facetParameter": "locations",
+                    "values": [{"descriptor": "Dublin", "id": "ie"}],
+                }
+            ]
+        },
+    )
     async with httpx.AsyncClient() as client:
         with pytest.raises(SourceError, match="no IDs"):
             await WorkdaySource(COMPANY, client).fetch()
     assert len(route.calls) == 1
 
 
-@pytest.mark.parametrize("title,body,expected", [
-    ("Clinical Study Specialist", BODY, True),
-    ("Clinical Study Associate", BODY, True),
-    ("Clinical Study Specialist", "Our company conducts clinical trials.", False),
-    ("Clinical Study Specialist", "Maintain investigator files and update CTMS.", False),
-    ("Clinical Study Associate Manager", BODY, False),
-    ("Clinical Project Manager", "Coordinate clinical trial execution.", True),
-    ("Sales Representative", BODY, False),
-])
+@pytest.mark.parametrize(
+    "title,body,expected",
+    [
+        ("Clinical Study Specialist", BODY, True),
+        ("Clinical Study Associate", BODY, True),
+        ("Clinical Study Specialist", "Our company conducts clinical trials.", False),
+        ("Clinical Study Specialist", "Maintain investigator files and update CTMS.", False),
+        ("Clinical Study Associate Manager", BODY, False),
+        ("Clinical Project Manager", "Coordinate clinical trial execution.", True),
+        ("Sales Representative", BODY, False),
+    ],
+)
 def test_existing_evidence_gates_without_company_exceptions(title, body, expected):
-    raw = RawJob(source_company="regeneron", title=title, description_raw=body,
-                 location_raw="TARRYTOWN; United States of America; Warren",
-                 url="https://regeneron.wd1.myworkdayjobs.com/en-US/Careers/job/test")
+    raw = RawJob(
+        source_company="regeneron",
+        title=title,
+        description_raw=body,
+        location_raw="TARRYTOWN; United States of America; Warren",
+        url="https://regeneron.wd1.myworkdayjobs.com/en-US/Careers/job/test",
+    )
     result = match_job(parse_job(raw), PROFILE, SearchPreferences())
     assert result.eligible is expected
 
@@ -217,21 +317,38 @@ async def test_location_validation_requires_configuration(missing):
             await WorkdaySource(cfg, client).fetch()
 
 
-@pytest.mark.parametrize("location,body,status", [
-    ("Remote - United States; United States of America; US", BODY, "eligible"),
-    ("Remote - United States; United States of America; US",
-     BODY + " Must reside in California.", "unsuitable"),
-    ("Uxbridge1; United Kingdom; GB; Armonk, United States of America; "
-     "Warren, United States of America", BODY + " This role is hybrid.", "review_needed"),
-])
+@pytest.mark.parametrize(
+    "location,body,status",
+    [
+        ("Remote - United States; United States of America; US", BODY, "eligible"),
+        (
+            "Remote - United States; United States of America; US",
+            BODY + " Must reside in California.",
+            "unsuitable",
+        ),
+        (
+            "Uxbridge1; United Kingdom; GB; Armonk, United States of America; "
+            "Warren, United States of America",
+            BODY + " This role is hybrid.",
+            "review_needed",
+        ),
+    ],
+)
 def test_scoped_availability_does_not_override_candidate_policy(location, body, status):
-    raw = RawJob(source_company="regeneron", title="Clinical Study Specialist",
-                 description_raw=body, location_raw=location,
-                 url="https://regeneron.wd1.myworkdayjobs.com/en-US/Careers/job/test")
-    preferences = SearchPreferences(candidate_eligibility=CandidateEligibilityConfig(
-        residence_state="Florida", held_professional_licenses=[],
-        commuting_policy={"onsite_states": ["FL"]},
-    ))
+    raw = RawJob(
+        source_company="regeneron",
+        title="Clinical Study Specialist",
+        description_raw=body,
+        location_raw=location,
+        url="https://regeneron.wd1.myworkdayjobs.com/en-US/Careers/job/test",
+    )
+    preferences = SearchPreferences(
+        candidate_eligibility=CandidateEligibilityConfig(
+            residence_state="Florida",
+            held_professional_licenses=[],
+            commuting_policy={"onsite_states": ["FL"]},
+        )
+    )
     result = match_job(parse_job(raw), PROFILE, preferences)
     assert result.discovery_eligible
     assert result.candidate_eligibility.status == status

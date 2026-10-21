@@ -257,7 +257,9 @@ def test_resolved_out_of_state_physical_attendance_is_not_commute_unresolved(loc
     result = assess_candidate(raw(location=location, body=body), preferences())
     assert result.status == "unsuitable"
     assert any("onsite_geography_incompatible" in reason for reason in result.hard_reasons)
-    assert any("resolved out-of-scope physical attendance" in reason for reason in result.hard_reasons)
+    assert any(
+        "resolved out-of-scope physical attendance" in reason for reason in result.hard_reasons
+    )
     assert not any("commute_unresolved" in reason for reason in result.review_reasons)
 
 
@@ -281,7 +283,9 @@ def test_remote_job_with_out_of_state_office_does_not_fail_physical_geography():
 
 
 def test_ambiguous_or_missing_physical_location_remains_review_needed():
-    result = assess_candidate(raw(location="Unknown location", body="This role is onsite."), preferences())
+    result = assess_candidate(
+        raw(location="Unknown location", body="This role is onsite."), preferences()
+    )
     assert result.status == "review_needed"
     assert "commute_unresolved: location missing or ambiguous" in result.review_reasons
 
@@ -705,7 +709,10 @@ def test_unresolved_summary_keeps_multiple_records_out_of_confirmed_sections():
     )
     assert "Unresolved eligibility/location: 2" in message
     assert "Retained unresolved records (not confirmed local opportunities):" in message
-    for title in ("Clinical Research Coordinator Unresolved One", "Clinical Research Coordinator Unresolved Two"):
+    for title in (
+        "Clinical Research Coordinator Unresolved One",
+        "Clinical Research Coordinator Unresolved Two",
+    ):
         assert message.count(title) == 1
     assert "Commute/eligibility review needed" not in message
     assert "Official posting" in message

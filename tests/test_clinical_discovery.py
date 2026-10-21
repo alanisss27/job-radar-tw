@@ -189,7 +189,6 @@ def test_responsibilities_qualify_without_pm_title(title):
         )
     )
 
-
     result = match_job(parsed, PROFILE, PREFERENCES)
 
     assert result.eligible
@@ -266,6 +265,8 @@ def test_contextual_support_titles_require_life_science_work(title, description)
 )
 def test_expanded_discovery_keeps_unrelated_and_execution_only_titles_out(title, description):
     assert not match(title, description).eligible
+
+
 @pytest.mark.parametrize(
     "title",
     [
@@ -333,13 +334,16 @@ SYNERG_VALIDATION_BODY = (
 )
 
 
-@pytest.mark.parametrize("title", [
-    "Validation Engineer",
-    "Senior Validation Engineer",
-    "CSV Validation Engineer",
-    "CQV Engineer",
-    "Senior CQV Engineer",
-])
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Validation Engineer",
+        "Senior Validation Engineer",
+        "CSV Validation Engineer",
+        "CQV Engineer",
+        "Senior CQV Engineer",
+    ],
+)
 def test_technical_validation_execution_does_not_use_incidental_project_context(title):
     result = match(title, SYNERG_VALIDATION_BODY)
     assert not result.eligible
@@ -357,19 +361,25 @@ def test_validation_specialist_with_affirmative_project_duties_remains_discovera
     assert result.score >= PROFILE.threshold
 
 
-@pytest.mark.parametrize("title", [
-    "Validation Project Manager",
-    "Validation Project Coordinator",
-    "Technical Operations Project Manager",
-])
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Validation Project Manager",
+        "Validation Project Coordinator",
+        "Technical Operations Project Manager",
+    ],
+)
 def test_explicit_validation_and_technical_operations_pm_titles_remain_discoverable(title):
     assert match(title).eligible
 
 
-@pytest.mark.parametrize("title", [
-    "Associate Director, Technical Operations",
-    "Director, Technical Operations",
-])
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Associate Director, Technical Operations",
+        "Director, Technical Operations",
+    ],
+)
 def test_technical_operations_leadership_needs_affirmative_pm_duties(title):
     result = match(
         title,

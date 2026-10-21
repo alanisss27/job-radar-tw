@@ -60,13 +60,10 @@ def structured_status(metadata: dict[str, Any]) -> ActiveStatus:
     workday_evidence = metadata.get("active_status_evidence")
     workday_evidence = workday_evidence if isinstance(workday_evidence, dict) else {}
     has_workday_status = isinstance(metadata.get("workday"), dict) or any(
-        key.casefold().replace("_", "") in {"posted", "canapply"}
-        for key in workday_evidence
+        key.casefold().replace("_", "") in {"posted", "canapply"} for key in workday_evidence
     )
     if has_workday_status:
-        can_apply = next(
-            (value for key, value in values if key == "canapply"), None
-        )
+        can_apply = next((value for key, value in values if key == "canapply"), None)
         apply_url = workday_evidence.get("apply_url") or workday_evidence.get("applyUrl")
         if isinstance(apply_url, str):
             parsed_apply_url = urlsplit(apply_url.strip())
@@ -82,8 +79,10 @@ def structured_status(metadata: dict[str, Any]) -> ActiveStatus:
         return ActiveStatus(recorded)
     if any(key == "canapply" and value is True for key, value in values):
         return ActiveStatus.ACTIVE
-    if any(key == "applyurl" and value.strip().startswith(("https://", "http://", "/"))
-           for key, value in values):
+    if any(
+        key == "applyurl" and value.strip().startswith(("https://", "http://", "/"))
+        for key, value in values
+    ):
         return ActiveStatus.ACTIVE
     return ActiveStatus.UNKNOWN
 
@@ -97,14 +96,22 @@ def page_status(content: str) -> ActiveStatus:
         return ActiveStatus.ACTIVE
     for node in soup.select("a[href], button, input[type=submit]"):
         label = " ".join(
-            [str(node.get_text(" ", strip=True)), str(node.get("aria-label", "")),
-             str(node.get("value", ""))]
+            [
+                str(node.get_text(" ", strip=True)),
+                str(node.get("aria-label", "")),
+                str(node.get("value", "")),
+            ]
         ).strip()
         if _APPLY.fullmatch(label):
             if node.name in {"button", "input"} and node.has_attr("disabled"):
                 return ActiveStatus.INACTIVE
             href = (node.get("href") or "").strip()
-            if node.name == "a" and href and href != "#" and not href.casefold().startswith("javascript:"):
+            if (
+                node.name == "a"
+                and href
+                and href != "#"
+                and not href.casefold().startswith("javascript:")
+            ):
                 return ActiveStatus.ACTIVE
             if node.name in {"button", "input"}:
                 return ActiveStatus.ACTIVE

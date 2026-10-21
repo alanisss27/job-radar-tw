@@ -13,7 +13,8 @@ from job_monitor.sources import EightfoldSource, SOURCE_CLASSES
 
 
 COMPANY = next(
-    company for company in load_companies(Path("config/companies.yml"))
+    company
+    for company in load_companies(Path("config/companies.yml"))
     if company.slug == "bristol-myers-squibb"
 )
 PROFILE = load_profiles(Path("config/profiles.yml"))["clinical-discovery"]
@@ -64,14 +65,25 @@ async def test_bms_paginates_at_effective_ten_deduplicates_and_enriches():
     details = cfg.ats_config["detail_endpoint"]
     pages = [
         [
-            {"id": 101, "name": "Senior Clinical Trial Management Associate",
-             "locations": ["Remote - United States - US"], "workLocationOption": "remote_local"},
-            {"id": 102, "name": "Global Trial Lead", "locations": [
-                "Princeton - NJ - US", "Warsaw - PL"], "workLocationOption": "onsite"},
+            {
+                "id": 101,
+                "name": "Senior Clinical Trial Management Associate",
+                "locations": ["Remote - United States - US"],
+                "workLocationOption": "remote_local",
+            },
+            {
+                "id": 102,
+                "name": "Global Trial Lead",
+                "locations": ["Princeton - NJ - US", "Warsaw - PL"],
+                "workLocationOption": "onsite",
+            },
         ],
         [
-            {"id": 102, "name": "Global Trial Lead", "locations": [
-                "Princeton - NJ - US", "Warsaw - PL"]},
+            {
+                "id": 102,
+                "name": "Global Trial Lead",
+                "locations": ["Princeton - NJ - US", "Warsaw - PL"],
+            },
             {"id": 103, "name": "Clinical Research Associate", "locations": ["Ohio - US"]},
         ],
     ]
@@ -81,31 +93,58 @@ async def test_bms_paginates_at_effective_ten_deduplicates_and_enriches():
         assert params["domain"] == "bms.com"
         assert params["location"] == "United States"
         assert params["num"] == "10"
-        return httpx.Response(200, json={"status": 200, "data": {
-            "count": 3, "positions": pages[0 if params["start"] == "0" else 1],
-        }})
+        return httpx.Response(
+            200,
+            json={
+                "status": 200,
+                "data": {
+                    "count": 3,
+                    "positions": pages[0 if params["start"] == "0" else 1],
+                },
+            },
+        )
 
     route = respx.get(search).mock(side_effect=search_response)
     respx.get(details, params={"domain": "bms.com", "position_id": "101"}).respond(
-        200, json={"status": 200, "data": _detail(
-            101, "R1603280", "Senior Clinical Trial Management Associate",
-            ["Remote - United States - US"],
-            "<p>Support study vendors, TMF tracking, study timelines, and Study Lead coordination.</p>",
-            work="remote_local", flexibility="remote",
-        )},
+        200,
+        json={
+            "status": 200,
+            "data": _detail(
+                101,
+                "R1603280",
+                "Senior Clinical Trial Management Associate",
+                ["Remote - United States - US"],
+                "<p>Support study vendors, TMF tracking, study timelines, and Study Lead coordination.</p>",
+                work="remote_local",
+                flexibility="remote",
+            ),
+        },
     )
     respx.get(details, params={"domain": "bms.com", "position_id": "102"}).respond(
-        200, json={"status": 200, "data": _detail(
-            102, "R1606342", "Global Trial Lead",
-            ["Princeton - NJ - US", "Warsaw - PL"],
-            "<p>Own end-to-end study delivery, budgets, timelines, and vendors.</p>",
-        )},
+        200,
+        json={
+            "status": 200,
+            "data": _detail(
+                102,
+                "R1606342",
+                "Global Trial Lead",
+                ["Princeton - NJ - US", "Warsaw - PL"],
+                "<p>Own end-to-end study delivery, budgets, timelines, and vendors.</p>",
+            ),
+        },
     )
     respx.get(details, params={"domain": "bms.com", "position_id": "103"}).respond(
-        200, json={"status": 200, "data": _detail(
-            103, "R1606243", "Clinical Research Associate", ["Ohio - US"],
-            "<p>Monitor clinical trial sites and conduct site visits.</p>",
-        )},
+        200,
+        json={
+            "status": 200,
+            "data": _detail(
+                103,
+                "R1606243",
+                "Clinical Research Associate",
+                ["Ohio - US"],
+                "<p>Monitor clinical trial sites and conduct site visits.</p>",
+            ),
+        },
     )
 
     async with httpx.AsyncClient() as client:
@@ -139,13 +178,23 @@ async def test_bms_listing_failure_is_source_fatal():
 @respx.mock
 async def test_bms_malformed_detail_is_excluded_and_reported():
     search = respx.get(COMPANY.ats_config["search_endpoint"]).respond(
-        200, json={"data": {"count": 1, "positions": [
-            {"id": 101, "name": "Clinical Trial Management Associate",
-             "locations": ["Remote - United States - US"]},
-        ]}},
+        200,
+        json={
+            "data": {
+                "count": 1,
+                "positions": [
+                    {
+                        "id": 101,
+                        "name": "Clinical Trial Management Associate",
+                        "locations": ["Remote - United States - US"],
+                    },
+                ],
+            }
+        },
     )
     detail = respx.get(COMPANY.ats_config["detail_endpoint"]).respond(
-        200, json={"data": {"id": 101, "name": "Clinical Trial Management Associate"}},
+        200,
+        json={"data": {"id": 101, "name": "Clinical Trial Management Associate"}},
     )
     async with httpx.AsyncClient() as client:
         source = EightfoldSource(COMPANY, client)
@@ -161,12 +210,12 @@ async def test_bms_malformed_detail_is_excluded_and_reported():
 @pytest.mark.parametrize(
     ("title", "body"),
     [
-        ("Senior Clinical Trial Management Associate",
-         "Support study vendors, TMF tracking, study timelines, and Study Lead coordination."),
-        ("Global Trial Lead",
-         "Own end-to-end study delivery, budgets, timelines, and vendors."),
-        ("Clinical Research Associate",
-         "Monitor clinical trial sites and conduct site visits."),
+        (
+            "Senior Clinical Trial Management Associate",
+            "Support study vendors, TMF tracking, study timelines, and Study Lead coordination.",
+        ),
+        ("Global Trial Lead", "Own end-to-end study delivery, budgets, timelines, and vendors."),
+        ("Clinical Research Associate", "Monitor clinical trial sites and conduct site visits."),
     ],
 )
 def test_bms_representative_roles_keep_existing_discovery_behavior(title, body):

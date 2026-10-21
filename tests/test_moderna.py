@@ -12,8 +12,7 @@ from job_monitor.sources import SOURCE_CLASSES, WorkdaySource
 
 
 COMPANY = next(
-    company for company in load_companies(Path("config/companies.yml"))
-    if company.slug == "moderna"
+    company for company in load_companies(Path("config/companies.yml")) if company.slug == "moderna"
 )
 
 
@@ -45,23 +44,44 @@ async def test_moderna_resolves_primarylocation_and_validates_details():
     cfg.ats_config["limit"] = 2
     endpoint = cfg.ats_config["endpoint"]
     detail_base = cfg.ats_config["detail_api_base"]
-    listing = respx.post(endpoint).mock(side_effect=[
-        httpx.Response(200, json={"facets": [{
-            "facetParameter": "primarylocation",
-            "values": [
-                {"id": "cambridge", "descriptor": "Cambridge, Massachusetts"},
-                {"id": "remote", "descriptor": "Remote - US"},
-                {"id": "london", "descriptor": "London, United Kingdom"},
-            ],
-        }]}),
-        httpx.Response(200, json={"total": 3, "jobPostings": [
-            {"externalPath": "/job/remote", "title": "Remote Clinical Associate"},
-            {"externalPath": "/job/mixed", "title": "US/Canada Clinical Associate"},
-        ]}),
-        httpx.Response(200, json={"total": 3, "jobPostings": [
-            {"externalPath": "/job/foreign", "title": "Foreign Clinical Associate"},
-        ]}),
-    ])
+    listing = respx.post(endpoint).mock(
+        side_effect=[
+            httpx.Response(
+                200,
+                json={
+                    "facets": [
+                        {
+                            "facetParameter": "primarylocation",
+                            "values": [
+                                {"id": "cambridge", "descriptor": "Cambridge, Massachusetts"},
+                                {"id": "remote", "descriptor": "Remote - US"},
+                                {"id": "london", "descriptor": "London, United Kingdom"},
+                            ],
+                        }
+                    ]
+                },
+            ),
+            httpx.Response(
+                200,
+                json={
+                    "total": 3,
+                    "jobPostings": [
+                        {"externalPath": "/job/remote", "title": "Remote Clinical Associate"},
+                        {"externalPath": "/job/mixed", "title": "US/Canada Clinical Associate"},
+                    ],
+                },
+            ),
+            httpx.Response(
+                200,
+                json={
+                    "total": 3,
+                    "jobPostings": [
+                        {"externalPath": "/job/foreign", "title": "Foreign Clinical Associate"},
+                    ],
+                },
+            ),
+        ]
+    )
     # The first POST above is the facet request; inspect the filtered request body.
     details = {
         "/job/remote": {
@@ -94,9 +114,7 @@ async def test_moderna_resolves_primarylocation_and_validates_details():
 
     assert listing.call_count == 3
     filtered_body = json.loads(listing.calls[1].request.content)
-    assert filtered_body["appliedFacets"] == {
-        "primarylocation": ["cambridge", "remote"]
-    }
+    assert filtered_body["appliedFacets"] == {"primarylocation": ["cambridge", "remote"]}
     assert {row.external_job_id for row in rows} == {"/job/remote", "/job/mixed"}
     remote = next(row for row in rows if row.external_job_id == "/job/remote")
     mixed = next(row for row in rows if row.external_job_id == "/job/mixed")

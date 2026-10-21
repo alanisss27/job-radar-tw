@@ -8,6 +8,8 @@ import httpx
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from .models import MatchedJob, MatchResult, ParsedJob
+from .diagnostics import render_diagnostics
+from .transferable_operations import PROFILE as OPERATIONS_PROFILE
 
 REVIEW_LABELS = {
     "title_body_level_mismatch": "職稱與要求層級不一致",
@@ -159,7 +161,7 @@ def render_failure_alert(company_name: str, failures: int, error: str) -> str:
 def render_run_summary(
     *,
     run_key: str,
-    stats: dict[str, int],
+    stats: dict,
     errors: list[dict[str, str]],
     source_warnings: list[dict[str, str]] | None = None,
     matched_jobs: list[MatchedJob],
@@ -169,6 +171,20 @@ def render_run_summary(
     display_timezone: str = "America/New_York",
 ) -> str:
     source_warnings = source_warnings or []
+    # Keep all decisions in storage/diagnostics, but show a job once when the
+    # supplemental review profile overlaps an existing displayed decision.
+    existing = {
+        (item.job.raw.source_company, item.job.raw.stable_external_id)
+        for item in matched_jobs
+        if item.result.profile != OPERATIONS_PROFILE
+        and (item.result.notification_eligible or item.result.needs_eligibility_review)
+    }
+    matched_jobs = [
+        item
+        for item in matched_jobs
+        if item.result.profile != OPERATIONS_PROFILE
+        or (item.job.raw.source_company, item.job.raw.stable_external_id) not in existing
+    ]
     reviews = [item for item in matched_jobs if item.result.needs_eligibility_review]
     unresolved_reviews = [
         item for item in reviews if not item.result.candidate_eligibility.review_visible
@@ -176,7 +192,8 @@ def render_run_summary(
     unresolved_count = len(unresolved_reviews)
     reviews = [item for item in reviews if item.result.candidate_eligibility.review_visible]
     matched_jobs = [
-        item for item in matched_jobs
+        item
+        for item in matched_jobs
         if item.result.notification_eligible
         and item.job.raw.metadata.get("active_status") != "inactive"
     ]
@@ -191,6 +208,8 @@ def render_run_summary(
         f"限量保留：{stats.get('notifications_suppressed', 0)}；"
         f"待重試：{stats.get('notifications_pending', 0)}",
     ]
+
+    lines.extend(["", html.escape(render_diagnostics(stats.get("decision_diagnostics")))])
 
     if zero_job_sources:
         lines.append("")
@@ -289,16 +308,20 @@ def render_run_summary(
             assessment = item.result.candidate_eligibility
             explanation = "; ".join(assessment.review_reasons)[:450]
             lines.append(
-                f'- {html.escape(item.company_name)} - '
+                f"- {html.escape(item.company_name)} - "
                 f'<a href="{html.escape(str(item.job.raw.url), quote=True)}">{html.escape(item.job.raw.title)}</a> '
-                f'({html.escape(item.job.raw.location_raw or "Location unresolved")}; '
-                f'{assessment.work_arrangement.value}; attendance: {assessment.attendance.category}) '
-                f'{html.escape(explanation)}'
+                f"({html.escape(item.job.raw.location_raw or 'Location unresolved')}; "
+                f"{assessment.work_arrangement.value}; attendance: {assessment.attendance.category}) "
+                f"{html.escape(explanation)}"
             )
         if len(reviews) > max_reviews:
-            lines.append(f"{len(reviews) - max_reviews} additional review records retained in match history.")
+            lines.append(
+                f"{len(reviews) - max_reviews} additional review records retained in match history."
+            )
     if unresolved_count:
-        lines.append(f"Unresolved eligibility/location: {unresolved_count} records retained for inspection; not confirmed local opportunities.")
+        lines.append(
+            f"Unresolved eligibility/location: {unresolved_count} records retained for inspection; not confirmed local opportunities."
+        )
         lines.append("Retained unresolved records (not confirmed local opportunities):")
         for item in sorted(unresolved_reviews, key=lambda match: match.result.score, reverse=True):
             assessment = item.result.candidate_eligibility

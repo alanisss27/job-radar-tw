@@ -227,15 +227,39 @@ async def test_smartrecruiters_pagination():
 @pytest.mark.asyncio
 @respx.mock
 async def test_talemetry_filters_us_and_reads_details():
-    cfg = company("talemetry", {"endpoint": "https://example.com/jobs.json", "detail_base_url": "https://example.com/jobs"})
-    respx.get(cfg.ats_config["endpoint"], params={"page": "1"}).respond(200, json={
-        "per_page": 25,
-        "entries": [
-            {"id": "1", "title": "Clinical Data Manager", "location": {"locality": "Boston", "region_abbr": "MA", "country": "United States"}},
-            {"id": "2", "title": "Clinical Data Manager", "location": {"locality": "Toronto", "country": "Canada"}},
-        ],
-    })
-    respx.get("https://example.com/jobs/1.json").respond(200, text='<link rel="canonical" href="/careers/1"><div class="job-details__content-description"><p>Clinical trials</p></div>')
+    cfg = company(
+        "talemetry",
+        {
+            "endpoint": "https://example.com/jobs.json",
+            "detail_base_url": "https://example.com/jobs",
+        },
+    )
+    respx.get(cfg.ats_config["endpoint"], params={"page": "1"}).respond(
+        200,
+        json={
+            "per_page": 25,
+            "entries": [
+                {
+                    "id": "1",
+                    "title": "Clinical Data Manager",
+                    "location": {
+                        "locality": "Boston",
+                        "region_abbr": "MA",
+                        "country": "United States",
+                    },
+                },
+                {
+                    "id": "2",
+                    "title": "Clinical Data Manager",
+                    "location": {"locality": "Toronto", "country": "Canada"},
+                },
+            ],
+        },
+    )
+    respx.get("https://example.com/jobs/1.json").respond(
+        200,
+        text='<link rel="canonical" href="/careers/1"><div class="job-details__content-description"><p>Clinical trials</p></div>',
+    )
     async with httpx.AsyncClient() as client:
         rows = await TalemetrySource(cfg, client).fetch()
     assert len(rows) == 1
@@ -249,17 +273,51 @@ async def test_talemetry_filters_us_and_reads_details():
 async def test_jibe_filters_us_and_paginates():
     cfg = company("jibe", {"endpoint": "https://example.com/api/jobs", "limit": 2})
     endpoint = cfg.ats_config["endpoint"]
-    respx.get(endpoint, params={"page": "1", "limit": "2"}).respond(200, json={
-        "totalCount": 3,
-        "jobs": [
-            {"data": {"req_id": "1", "title": "CRA", "country_code": "US", "full_location": "Cincinnati, Ohio", "description": "<p>Trials</p>", "posted_date": "2026-09-18T12:00:00+0000", "apply_url": "https://icims.example/1"}},
-            {"data": {"req_id": "2", "title": "CRA", "country_code": "GB", "full_location": "London, UK"}},
-        ],
-    })
-    respx.get(endpoint, params={"page": "2", "limit": "2"}).respond(200, json={
-        "totalCount": 3,
-        "jobs": [{"data": {"req_id": "3", "title": "Clinical PM", "country_code": "US", "full_location": "Boston, Massachusetts", "description": "<p>Manage</p>", "apply_url": "https://icims.example/3"}}],
-    })
+    respx.get(endpoint, params={"page": "1", "limit": "2"}).respond(
+        200,
+        json={
+            "totalCount": 3,
+            "jobs": [
+                {
+                    "data": {
+                        "req_id": "1",
+                        "title": "CRA",
+                        "country_code": "US",
+                        "full_location": "Cincinnati, Ohio",
+                        "description": "<p>Trials</p>",
+                        "posted_date": "2026-09-18T12:00:00+0000",
+                        "apply_url": "https://icims.example/1",
+                    }
+                },
+                {
+                    "data": {
+                        "req_id": "2",
+                        "title": "CRA",
+                        "country_code": "GB",
+                        "full_location": "London, UK",
+                    }
+                },
+            ],
+        },
+    )
+    respx.get(endpoint, params={"page": "2", "limit": "2"}).respond(
+        200,
+        json={
+            "totalCount": 3,
+            "jobs": [
+                {
+                    "data": {
+                        "req_id": "3",
+                        "title": "Clinical PM",
+                        "country_code": "US",
+                        "full_location": "Boston, Massachusetts",
+                        "description": "<p>Manage</p>",
+                        "apply_url": "https://icims.example/3",
+                    }
+                }
+            ],
+        },
+    )
     async with httpx.AsyncClient() as client:
         rows = await JibeSource(cfg, client).fetch()
     assert [row.external_job_id for row in rows] == ["1", "3"]
@@ -283,38 +341,45 @@ async def test_jibe_merges_static_query_params_without_overriding_pagination():
         200,
         json={
             "totalCount": 3,
-            "jobs": [{
-                "data": {
-                    "req_id": "1",
-                    "title": "Quality Research Coordinator",
-                    "country_code": "US",
-                    "full_location": "Tampa, Florida",
-                    "description": "Research quality operations",
-                }
-            }, {
-                "data": {
-                    "req_id": "1b",
-                    "title": "Quality Research Associate",
-                    "country_code": "CA",
-                    "full_location": "Toronto, Canada",
-                    "description": "Research quality operations",
-                }
-            }],
+            "jobs": [
+                {
+                    "data": {
+                        "req_id": "1",
+                        "title": "Quality Research Coordinator",
+                        "country_code": "US",
+                        "full_location": "Tampa, Florida",
+                        "description": "Research quality operations",
+                    }
+                },
+                {
+                    "data": {
+                        "req_id": "1b",
+                        "title": "Quality Research Associate",
+                        "country_code": "CA",
+                        "full_location": "Toronto, Canada",
+                        "description": "Research quality operations",
+                    }
+                },
+            ],
         },
     )
-    second = respx.get(endpoint, params={"categories": category, "page": "2", "limit": "2"}).respond(
+    second = respx.get(
+        endpoint, params={"categories": category, "page": "2", "limit": "2"}
+    ).respond(
         200,
         json={
             "totalCount": 3,
-            "jobs": [{
-                "data": {
-                    "req_id": "2",
-                    "title": "Quality Operations Specialist",
-                    "country_code": "US",
-                    "full_location": "Orlando, Florida",
-                    "description": "Coordinate quality operations",
+            "jobs": [
+                {
+                    "data": {
+                        "req_id": "2",
+                        "title": "Quality Operations Specialist",
+                        "country_code": "US",
+                        "full_location": "Orlando, Florida",
+                        "description": "Coordinate quality operations",
+                    }
                 }
-            }],
+            ],
         },
     )
     async with httpx.AsyncClient() as client:
@@ -573,11 +638,13 @@ async def test_workday_detail_explicit_availability_controls_retention(availabil
         200,
         json={
             "total": 1,
-            "jobPostings": [{
-                "title": "Project Manager",
-                "externalPath": external_path,
-                "locationsText": "United States",
-            }],
+            "jobPostings": [
+                {
+                    "title": "Project Manager",
+                    "externalPath": external_path,
+                    "locationsText": "United States",
+                }
+            ],
         },
     )
     respx.get(detail_api_base + external_path).respond(
@@ -1148,8 +1215,12 @@ async def test_workday_unresolved_facet_patterns_fail_closed(facets):
 async def test_workday_invalid_facet_patterns_fail_before_http(patterns):
     cfg = company(
         "workday",
-        {"endpoint": "https://example.com/jobs", "site": "example.com", "facet_patterns": patterns,
-         "detail_base_url": "https://example.com"},
+        {
+            "endpoint": "https://example.com/jobs",
+            "site": "example.com",
+            "facet_patterns": patterns,
+            "detail_base_url": "https://example.com",
+        },
     )
     async with httpx.AsyncClient() as client:
         with pytest.raises(SourceError):
@@ -1232,6 +1303,7 @@ async def test_workday_missing_retry_after_uses_bounded_jittered_backoff(monkeyp
 @pytest.mark.asyncio
 async def test_workday_persistent_429_and_permanent_4xx_are_transparent(monkeypatch):
     controller = WorkdayRequestController(concurrency=1, min_interval_seconds=0)
+
     async def no_sleep(*_):
         return None
 
@@ -1266,22 +1338,43 @@ async def test_workday_persistent_429_and_permanent_4xx_are_transparent(monkeypa
 async def test_workday_listing_and_detail_both_use_shared_retry_path():
     cfg = company(
         "workday",
-        {"endpoint": "https://example.com/jobs", "site": "example.com",
-         "detail_base_url": "https://example.com/careers",
-         "detail_api_base": "https://example.com/careers"},
+        {
+            "endpoint": "https://example.com/jobs",
+            "site": "example.com",
+            "detail_base_url": "https://example.com/careers",
+            "detail_api_base": "https://example.com/careers",
+        },
     )
-    listing = respx.post(cfg.ats_config["endpoint"]).mock(side_effect=[
-        httpx.Response(429),
-        httpx.Response(200, json={"total": 1, "jobPostings": [{
-            "externalPath": "/job/1", "title": "Clinical Project Coordinator",
-        }]}),
-    ])
-    detail = respx.get(cfg.ats_config["detail_base_url"] + "/job/1").mock(side_effect=[
-        httpx.Response(429),
-        httpx.Response(200, json={"jobPostingInfo": {
-            "jobDescription": "<p>Coordinate clinical trials.</p>",
-        }}),
-    ])
+    listing = respx.post(cfg.ats_config["endpoint"]).mock(
+        side_effect=[
+            httpx.Response(429),
+            httpx.Response(
+                200,
+                json={
+                    "total": 1,
+                    "jobPostings": [
+                        {
+                            "externalPath": "/job/1",
+                            "title": "Clinical Project Coordinator",
+                        }
+                    ],
+                },
+            ),
+        ]
+    )
+    detail = respx.get(cfg.ats_config["detail_base_url"] + "/job/1").mock(
+        side_effect=[
+            httpx.Response(429),
+            httpx.Response(
+                200,
+                json={
+                    "jobPostingInfo": {
+                        "jobDescription": "<p>Coordinate clinical trials.</p>",
+                    }
+                },
+            ),
+        ]
+    )
     async with httpx.AsyncClient() as client:
         jobs = await WorkdaySource(cfg, client).fetch()
     assert len(jobs) == 1
@@ -1304,10 +1397,12 @@ async def test_concurrent_workday_requests_share_bounded_controller():
         return httpx.Response(200, request=request)
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        await asyncio.gather(*(
-            controller.request(client, "POST", f"https://example.test/{index}")
-            for index in range(8)
-        ))
+        await asyncio.gather(
+            *(
+                controller.request(client, "POST", f"https://example.test/{index}")
+                for index in range(8)
+            )
+        )
     assert maximum <= 2
 
 
@@ -1328,13 +1423,19 @@ async def test_source_runner_shares_workday_limiter_but_not_for_greenhouse():
 
     workday_one = company(
         "workday",
-        {"endpoint": "https://workday-one.test/jobs", "site": "workday-one.test",
-         "detail_base_url": "https://workday-one.test/careers"},
+        {
+            "endpoint": "https://workday-one.test/jobs",
+            "site": "workday-one.test",
+            "detail_base_url": "https://workday-one.test/careers",
+        },
     )
     workday_two = company(
         "workday",
-        {"endpoint": "https://workday-two.test/jobs", "site": "workday-two.test",
-         "detail_base_url": "https://workday-two.test/careers"},
+        {
+            "endpoint": "https://workday-two.test/jobs",
+            "site": "workday-two.test",
+            "detail_base_url": "https://workday-two.test/careers",
+        },
     )
     greenhouse = company(
         "greenhouse",
@@ -1361,24 +1462,47 @@ async def test_validated_workday_exclusion_returns_other_jobs_and_warning():
             "validate_location_facets": True,
         },
     )
-    respx.post(cfg.ats_config["endpoint"]).mock(side_effect=[
-        httpx.Response(200, json={"facets": [{"facetParameter": "locations", "values": [
-            {"id": "us", "descriptor": "United States"},
-        ]}]}),
-        httpx.Response(200, json={"total": 2, "jobPostings": [
-            {"externalPath": "/job/bad", "title": "Excluded Study Associate"},
-            {"externalPath": "/job/good", "title": "Valid Study Associate"},
-        ]}),
-    ])
+    respx.post(cfg.ats_config["endpoint"]).mock(
+        side_effect=[
+            httpx.Response(
+                200,
+                json={
+                    "facets": [
+                        {
+                            "facetParameter": "locations",
+                            "values": [
+                                {"id": "us", "descriptor": "United States"},
+                            ],
+                        }
+                    ]
+                },
+            ),
+            httpx.Response(
+                200,
+                json={
+                    "total": 2,
+                    "jobPostings": [
+                        {"externalPath": "/job/bad", "title": "Excluded Study Associate"},
+                        {"externalPath": "/job/good", "title": "Valid Study Associate"},
+                    ],
+                },
+            ),
+        ]
+    )
     respx.get(cfg.ats_config["detail_api_base"] + "/job/bad").mock(
         side_effect=[httpx.Response(503), httpx.Response(503), httpx.Response(503)]
     )
     respx.get(cfg.ats_config["detail_api_base"] + "/job/good").mock(
-        return_value=httpx.Response(200, json={"jobPostingInfo": {
-            "location": "United States",
-            "additionalLocations": [],
-            "jobDescription": "Study operations",
-        }})
+        return_value=httpx.Response(
+            200,
+            json={
+                "jobPostingInfo": {
+                    "location": "United States",
+                    "additionalLocations": [],
+                    "jobDescription": "Study operations",
+                }
+            },
+        )
     )
     async with httpx.AsyncClient() as client:
         source = WorkdaySource(cfg, client)

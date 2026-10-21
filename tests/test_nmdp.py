@@ -17,21 +17,35 @@ IDS = ["1947", "2022", "2028", "2040", "2041", "2019"]
 
 def item(job_id, **updates):
     return {
-        "Id": job_id, "Title": "Clinical Research Project Coordinator",
+        "Id": job_id,
+        "Title": "Clinical Research Project Coordinator",
         "PrimaryLocation": "Minneapolis, MN, United States",
-        "PrimaryLocationCountry": "US", "WorkplaceTypeCode": "ORA_REMOTE",
-        "WorkplaceType": "Remote", "PostedDate": "2026-09-30",
+        "PrimaryLocationCountry": "US",
+        "WorkplaceTypeCode": "ORA_REMOTE",
+        "WorkplaceType": "Remote",
+        "PostedDate": "2026-09-30",
         "ShortDescriptionStr": "Coordinate clinical studies and study timelines.",
-        "secondaryLocations": [], **updates,
+        "secondaryLocations": [],
+        **updates,
     }
 
 
 def page(ids, offset=0, limit=3, total=6):
     # Deliberately misleading wrapper metadata must not stop pagination.
-    return {"count": 1, "hasMore": False, "offset": 0, "limit": 200, "items": [{
-        "Offset": offset, "Limit": limit, "TotalJobsCount": total,
-        "requisitionList": [item(i) for i in ids],
-    }]}
+    return {
+        "count": 1,
+        "hasMore": False,
+        "offset": 0,
+        "limit": 200,
+        "items": [
+            {
+                "Offset": offset,
+                "Limit": limit,
+                "TotalJobsCount": total,
+                "requisitionList": [item(i) for i in ids],
+            }
+        ],
+    }
 
 
 def small_company():
@@ -47,16 +61,24 @@ async def test_inventory_runner_and_candidate_hydration():
         assert "offset" not in request.url.params and "limit" not in request.url.params
         if request.url.path.endswith("recruitingCEJobRequisitionDetails"):
             assert request.url.params["finder"] == "ById;Id=2028,siteNumber=CX_2"
-            return httpx.Response(200, json={"items": [{
-                "Id": "2028", "ExternalDescriptionStr": "<p>Manage clinical studies.</p>",
-                "ExternalQualificationsStr": "<p>Bachelor's degree required.</p>",
-                "ExternalResponsibilitiesStr": "<p>Coordinate study timelines.</p>",
-            }]})
+            return httpx.Response(
+                200,
+                json={
+                    "items": [
+                        {
+                            "Id": "2028",
+                            "ExternalDescriptionStr": "<p>Manage clinical studies.</p>",
+                            "ExternalQualificationsStr": "<p>Bachelor's degree required.</p>",
+                            "ExternalResponsibilitiesStr": "<p>Coordinate study timelines.</p>",
+                        }
+                    ]
+                },
+            )
         finder = request.url.params["finder"]
         assert finder.startswith("findReqs;siteNumber=CX_2,facetsList=NONE,limit=3,offset=")
         offset = int(finder.rsplit("=", 1)[1])
         assert offset in (0, 3)
-        return httpx.Response(200, json=page(IDS[offset:offset + 3], offset))
+        return httpx.Response(200, json=page(IDS[offset : offset + 3], offset))
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
         runner = SourceRunner(client)
@@ -66,7 +88,8 @@ async def test_inventory_runner_and_candidate_hydration():
         assert len(requests) == 2  # No detail I/O during inventory retrieval.
         candidate = jobs[2]
         result = match_job(
-            parse_job(candidate), load_profiles(Path("config/profiles.yml"))["clinical-discovery"],
+            parse_job(candidate),
+            load_profiles(Path("config/profiles.yml"))["clinical-discovery"],
             load_preferences(Path("config/preferences.yml")),
         )
         assert _potential_city_of_hope_candidate([result])
@@ -82,15 +105,18 @@ async def test_inventory_runner_and_candidate_hydration():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("failure, message", [
-    ("repeated", "repeated requisition"),
-    ("offset", "non-advancing"),
-    ("empty", "unexpected empty"),
-    ("partial", "page count"),
-    ("total", "total changed"),
-    ("metadata", "pagination metadata"),
-    ("zero_limit", "non-advancing"),
-])
+@pytest.mark.parametrize(
+    "failure, message",
+    [
+        ("repeated", "repeated requisition"),
+        ("offset", "non-advancing"),
+        ("empty", "unexpected empty"),
+        ("partial", "page count"),
+        ("total", "total changed"),
+        ("metadata", "pagination metadata"),
+        ("zero_limit", "non-advancing"),
+    ],
+)
 async def test_pagination_failures_are_visible(failure, message):
     responses = [page(IDS[:3]), page(IDS[3:], 3)]
     second = responses[1]["items"][0]
@@ -120,21 +146,24 @@ async def test_pagination_failures_are_visible(failure, message):
 
 @pytest.mark.asyncio
 async def test_empty_inventory_is_valid():
-    async with httpx.AsyncClient(transport=httpx.MockTransport(
-        lambda request: httpx.Response(200, json=page([], total=0))
-    )) as client:
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, json=page([], total=0)))
+    ) as client:
         assert await OracleSource(small_company(), client).fetch() == []
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("detail", [
-    {"Id": "9999", "ExternalDescriptionStr": "Wrong job"},
-    {"Id": "2028", "ExternalDescriptionStr": ""},
-])
+@pytest.mark.parametrize(
+    "detail",
+    [
+        {"Id": "9999", "ExternalDescriptionStr": "Wrong job"},
+        {"Id": "2028", "ExternalDescriptionStr": ""},
+    ],
+)
 async def test_invalid_detail_fails_visibly(detail):
-    async with httpx.AsyncClient(transport=httpx.MockTransport(
-        lambda request: httpx.Response(200, json={"items": [detail]})
-    )) as client:
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, json={"items": [detail]}))
+    ) as client:
         source = OracleSource(COMPANY, client)
         with pytest.raises(SourceError):
             await source.hydrate(source._normalize(item("2028")))

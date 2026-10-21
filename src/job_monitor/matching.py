@@ -9,6 +9,7 @@ from .eligibility import assess_candidate, work_arrangement
 from .models import (
     CandidateProfile,
     DegreeLevel,
+    EligibilityAssessment,
     JobLevel,
     MatchResult,
     ParsedJob,
@@ -20,6 +21,7 @@ from .models import (
     VisaSupport,
 )
 from .resume import SKILL_ALIASES
+from .transferable_operations import PROFILE as OPERATIONS_PROFILE, operations_evidence
 
 
 def _clinical_review_flags(title: str, description: str) -> list[ReviewFlag]:
@@ -418,7 +420,8 @@ def _clinical_transition_title(title: str) -> bool:
             r"(?:senior\s+|sr\.?\s+)?(?:clinical\s+study\s+(?:associate|specialist)|"
             r"clinical\s+project\s+associate|(?:clinical\s+)?project\s+support\s+specialist|"
             r"clinical\s+trials?\s+assistant)(?:\s*[-–—,(].*)?",
-            title.strip(), re.I,
+            title.strip(),
+            re.I,
         )
         and not re.search(
             r"\b(?:manager|director|head|lead|leader|monitoring|cra|nurse)\b", title, re.I
@@ -431,8 +434,9 @@ def _clinical_coordination_evidence(title: str, description: str) -> set[str]:
     lower_title = title.casefold()
     clauses = _clinical_clauses(description)
     evidence: set[str] = set()
-    if (re.search(r"\bclinical\s+trials?\s+administrator\b", lower_title)
-            or _clinical_transition_title(title)):
+    if re.search(
+        r"\bclinical\s+trials?\s+administrator\b", lower_title
+    ) or _clinical_transition_title(title):
         evidence.update(_clinical_trial_administration_evidence(title, description))
     elif re.search(r"\bresearch associate\b", lower_title):
         human = re.compile(
@@ -533,33 +537,40 @@ def _clinical_trial_administration_evidence(title: str, description: str) -> set
     if transition:
         # Reuse the administration categories without changing the existing path.
         # New variants require duties, not a title or employer boilerplate alone.
-        categories.update({
-            "meetings": re.compile(
-                categories["meetings"].pattern + r"|\bstudy\s+(?:team\s+)?meetings?\b", re.I
-            ),
-            "reporting": re.compile(
-                r"\b(?:study\s+(?:reports?|metrics)|reports?\s+and\s+metrics)\b", re.I
-            ),
-            "coordination": re.compile(
-                r"\b(?:study\s+timelines?|"
-                r"project\s+action\s+items?|project\s+plans?)\b", re.I
-            ),
-        })
+        categories.update(
+            {
+                "meetings": re.compile(
+                    categories["meetings"].pattern + r"|\bstudy\s+(?:team\s+)?meetings?\b", re.I
+                ),
+                "reporting": re.compile(
+                    r"\b(?:study\s+(?:reports?|metrics)|reports?\s+and\s+metrics)\b", re.I
+                ),
+                "coordination": re.compile(
+                    r"\b(?:study\s+timelines?|"
+                    r"project\s+action\s+items?|project\s+plans?)\b",
+                    re.I,
+                ),
+            }
+        )
         duty = re.compile(
             r"\b(?:(?:support|assist|maintain|track|deliver|collect|review)(?:s|ing)?|"
             r"(?:updat|coordinat|organiz|organis|prepar|reconcil|schedul|collat)"
-            r"(?:e|es|ing))\b", re.I
+            r"(?:e|es|ing))\b",
+            re.I,
         )
         clauses = [
-            clause for clause in clauses
-            if (action := duty.search(clause)) and any(
+            clause
+            for clause in clauses
+            if (action := duty.search(clause))
+            and any(
                 (task := pattern.search(clause)) and action.start() < task.start()
                 for pattern in categories.values()
             )
         ]
         context = re.compile(
             r"\b(?:clinical\s+(?:trials?|study|studies|research|operations|project)|"
-            r"study\s+protocol|ich[- ]?gcp|gcp)\b", re.I
+            r"study\s+protocol|ich[- ]?gcp|gcp)\b",
+            re.I,
         )
     hits = {
         name: [clause for clause in clauses if pattern.search(clause)]
@@ -570,8 +581,11 @@ def _clinical_trial_administration_evidence(title: str, description: str) -> set
         return set()
     contextual = any(
         any(pattern.search(clause) for pattern in categories.values())
-        and (bool(context.search(clause)) if transition else
-             any(context.search(nearby) for nearby in clauses[max(0, index - 1) : index + 2]))
+        and (
+            bool(context.search(clause))
+            if transition
+            else any(context.search(nearby) for nearby in clauses[max(0, index - 1) : index + 2])
+        )
         for index, clause in enumerate(clauses)
     )
     if not contextual:
@@ -678,9 +692,7 @@ def _clinical_trial_manager_evidence(title: str, description: str) -> set[str]:
     categories: set[str] = set()
     excerpts: list[str] = []
     for clause in clauses:
-        matched = [
-            name for name, pattern in _CTM_DUTY_CATEGORIES.items() if pattern.search(clause)
-        ]
+        matched = [name for name, pattern in _CTM_DUTY_CATEGORIES.items() if pattern.search(clause)]
         if matched:
             categories.update(matched)
             excerpts.append(clause)
@@ -730,14 +742,16 @@ _PM_DUTY_ACTION = re.compile(
     r"responsibilities include|duties include)\s+)?"
     r"(?:(?:maintain|develop|track|support|own|lead|monitor|deliver|report)"
     r"(?:s|ed|ing)?|(?:manag|prepar|updat|facilitat|ensur|coordinat)(?:e[sd]?|ing)|"
-    r"oversee(?:s|ing)?|oversaw|led)\s+", re.I,
+    r"oversee(?:s|ing)?|oversaw|led)\s+",
+    re.I,
 )
 _PM_WORK_DOMAIN = re.compile(
     r"\b(?:(?:biotech(?:nology)?|pharma(?:ceutical)?s?|biopharma(?:ceutical)?s?|"
     r"life[ -]sciences?|cro|contract research organization|clinical|gmp|gxp|glp)\s+"
     r"(?:(?:development|operations|validation|research|scientific|quality)\s+){0,2}"
     r"(?:projects?|operations|research|deliverables|development)|"
-    r"(?:scientific|laboratory|lab) operations|regulated research)\b", re.I,
+    r"(?:scientific|laboratory|lab) operations|regulated research)\b",
+    re.I,
 )
 
 _PM_AFFIRMATIVE_FALLBACK_PATTERNS = (
@@ -779,7 +793,7 @@ def _affirmative_pm_fallback_evidence(description: str) -> bool:
             continue
         if re.search(
             r"\b(?:is|are|means|refers to|includes?|involves?)\b",
-            clause[action.end():],
+            clause[action.end() :],
             re.I,
         ):
             continue
@@ -799,12 +813,14 @@ def _transferable_pm_evidence(title: str, description: str) -> set[str]:
         r"(?:coordinator|specialist|manager)|associate project manager|"
         r"(?:(?:scientific|regulated research) )?(?:program|study) coordinator)"
         r"(?:\s*(?:[-–—,(]).*)?",
-        title.strip(), re.I,
+        title.strip(),
+        re.I,
     ) or re.search(
         r"\b(?:senior|sr|director|head|principal|executive|president|scientist|"
         r"technician|engineer|engineering|medical|cra|monitoring|data management|"
         r"statistical programming|software|construction|marketing|qa|qc|program lead)\b",
-        title, re.I,
+        title,
+        re.I,
     ):
         return set()
     # Strong execution/leadership duties cannot be rescued by PM vocabulary.
@@ -813,7 +829,8 @@ def _transferable_pm_evidence(title: str, description: str) -> set[str]:
         r"(?:assays?|bench experiments?|laboratory testing|site monitoring|monitoring visits|"
         r"qc testing|statistical programming)\b|"
         r"\b(?:principal investigator|study director|independent scientific leadership)\b",
-        description, re.I,
+        description,
+        re.I,
     ):
         return set()
     categories = set()
@@ -822,7 +839,8 @@ def _transferable_pm_evidence(title: str, description: str) -> set[str]:
         if re.search(
             r"\b(?:no|not|without|preferred|experience|familiarity|"
             r"company|employer|organization|department|capability|discipline)\b",
-            clause, re.I,
+            clause,
+            re.I,
         ):
             continue
         action = _PM_DUTY_ACTION.match(clause)
@@ -831,7 +849,8 @@ def _transferable_pm_evidence(title: str, description: str) -> set[str]:
         # Gerunds can also name concepts ("Tracking ... is ...").
         if re.search(
             r"\b(?:is|are|means|refers to|includes?|involves?)\b",
-            clause[action.end():], re.I,
+            clause[action.end() :],
+            re.I,
         ):
             continue
         # One affirmative work-context clause can ground the other PM duties;
@@ -839,7 +858,8 @@ def _transferable_pm_evidence(title: str, description: str) -> set[str]:
         if not re.search(r"\b(?:software|IT|construction|marketing)\b", clause, re.I):
             work_domain |= bool(_PM_WORK_DOMAIN.search(clause))
         categories.update(
-            name for name, pattern in _PM_CATEGORY_PATTERNS.items()
+            name
+            for name, pattern in _PM_CATEGORY_PATTERNS.items()
             if re.search(pattern, clause, re.I)
         )
     return categories if work_domain and len(categories) >= 3 else set()
@@ -941,6 +961,25 @@ def _match_discovery(
                 required_years_min=job.required_years_min,
             )
 
+    if profile.name == OPERATIONS_PROFILE:
+        evidence = operations_evidence(job.raw.title, job.raw.description_raw)
+        return MatchResult(
+            profile=profile.name,
+            score=0.0 if evidence.rejection else 1.0,
+            eligible=evidence.rejection is None,
+            tier="filtered" if evidence.rejection else "strong",
+            filtered_reason=evidence.rejection,
+            reasons=(
+                ["transferable operations: " + ", ".join(evidence.duties)]
+                if evidence.duties
+                else []
+            ),
+            reach=reach,
+            bucket=bucket,
+            level=job.level.value if candidate else None,
+            required_years_min=job.required_years_min if candidate else None,
+        )
+
     title_text = job.raw.title.lower()
     title_desc = f"{job.raw.title} {job.raw.description_raw}".lower()
     title_hit = (
@@ -966,9 +1005,7 @@ def _match_discovery(
         clinical_trial_manager_hits = _clinical_trial_manager_evidence(
             job.raw.title, job.raw.description_raw
         )
-        transferable_pm_hits = _transferable_pm_evidence(
-            job.raw.title, job.raw.description_raw
-        )
+        transferable_pm_hits = _transferable_pm_evidence(job.raw.title, job.raw.description_raw)
         clinical_coordination_hits = _clinical_coordination_evidence(
             job.raw.title, job.raw.description_raw
         )
@@ -1059,9 +1096,7 @@ def _match_discovery(
             "clinical project support: " + " | ".join(sorted(clinical_project_support_hits))
         )
     if clinical_trial_manager_hits:
-        reasons.append(
-            "clinical trial manager: " + " | ".join(sorted(clinical_trial_manager_hits))
-        )
+        reasons.append("clinical trial manager: " + " | ".join(sorted(clinical_trial_manager_hits)))
     if transferable_pm_hits:
         reasons.append("transferable life-science PM: " + ", ".join(sorted(transferable_pm_hits)))
     if contextual_title_hits:
@@ -1150,10 +1185,14 @@ def match_job(
     if preferences.candidate_eligibility is not None:
         job = job.model_copy(update={"remote_type": work_arrangement(job.raw)[0]})
     result = _match_discovery(
-        job, profile, preferences, resume,
+        job,
+        profile,
+        preferences,
+        resume,
         visa_sponsorship_required=visa_sponsorship_required,
         company_visa_support=company_visa_support,
-        candidate=candidate, company_ndx_member=company_ndx_member,
+        candidate=candidate,
+        company_ndx_member=company_ndx_member,
     )
     if preferences.candidate_eligibility is not None:
         assessment = assess_candidate(job.raw, preferences)
@@ -1162,4 +1201,26 @@ def match_job(
         result.eligibility_reasons = assessment.hard_reasons + assessment.review_reasons
         result.eligible = result.eligible and assessment.status == "eligible"
         # Discovery tier, score, reasons and existing career filters remain intact.
+    if profile.name == OPERATIONS_PROFILE and result.filtered_reason in {
+        None,
+        "operations_duties_insufficient",
+        "operations_transferability_unverified",
+    }:
+        # This model has no verified operations/product skills or required-degree
+        # evidence. Never promote duty evidence into candidate qualification.
+        assessment = result.candidate_eligibility or EligibilityAssessment()
+        if result.filtered_reason is not None:
+            assessment.review_reasons.append(
+                result.filtered_reason + ": affirmative JD evidence is missing"
+            )
+        assessment.review_reasons.append(
+            "operations_qualifications_unverified: "
+            "transferable experience and JD requirements need review"
+        )
+        assessment.status = "unsuitable" if assessment.hard_reasons else "review_needed"
+        if result.discovery_eligible is None:
+            result.discovery_eligible = result.eligible
+        result.candidate_eligibility = assessment
+        result.eligibility_reasons = assessment.hard_reasons + assessment.review_reasons
+        result.eligible = False
     return result

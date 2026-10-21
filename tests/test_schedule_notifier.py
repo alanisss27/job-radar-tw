@@ -29,12 +29,14 @@ def test_summary_shows_structured_source_warnings_only_when_present():
     assert "Source warnings:" not in plain
     summary = render_run_summary(
         **kwargs,
-        source_warnings=[{
-            "company": "Regeneron",
-            "title": "Study Associate",
-            "reason": "detail request failed after retries",
-            "url": "https://example.test/job/1",
-        }],
+        source_warnings=[
+            {
+                "company": "Regeneron",
+                "title": "Study Associate",
+                "reason": "detail request failed after retries",
+                "url": "https://example.test/job/1",
+            }
+        ],
     )
     assert "Source warnings:" in summary
     assert "Regeneron" in summary
@@ -66,6 +68,7 @@ def test_scheduled_run_key_skips_before_et_window():
 @pytest.mark.parametrize("month,utc_hour", [(1, 12), (6, 11), (3, 11), (11, 12)])
 def test_notification_wait_targets_nine_eastern(month, utc_hour):
     from job_monitor.schedule import notification_delay
+
     assert notification_delay(datetime(2026, month, 18, utc_hour, 30, tzinfo=UTC)) == 5400
     assert notification_delay(datetime(2026, month, 18, utc_hour + 2, 0, tzinfo=UTC)) == 0
 

@@ -12,7 +12,8 @@ from job_monitor.sources import SOURCE_CLASSES, TalentBrewSource
 
 
 COMPANY = next(
-    item for item in load_companies(Path("config/companies.yml"))
+    item
+    for item in load_companies(Path("config/companies.yml"))
     if item.slug == "alexion-astrazeneca-rare-disease"
 )
 ENDPOINT = "https://careers.astrazeneca.com/search-jobs/results"
@@ -41,19 +42,30 @@ def detail(req: str, title: str, close_date: str, location: str, apply: bool = T
 @respx.mock
 async def test_alexion_filter_deduplicates_requisitions_and_normalizes_details():
     # R-258358 occurs twice through overlapping parent/brand result entries.
-    page = "<html>" + listing(
-        "R-258358", "99395335280", "Senior Director, Study Start-up", "Boston, MA (Hybrid)"
-    ) + listing(
-        "R-258358", "99395335280-copy", "Senior Director, Study Start-up", "Boston, MA (Hybrid)"
-    ) + listing("R-252260", "99395111222", "Director, Country Operations", "Boston, MA (Onsite)") + listing(
-        "R-999999", "99395555111", "Unrelated Role", "New York, NY", "Other Pharma"
-    ) + "</html>"
+    page = (
+        "<html>"
+        + listing(
+            "R-258358", "99395335280", "Senior Director, Study Start-up", "Boston, MA (Hybrid)"
+        )
+        + listing(
+            "R-258358", "99395335280-copy", "Senior Director, Study Start-up", "Boston, MA (Hybrid)"
+        )
+        + listing("R-252260", "99395111222", "Director, Country Operations", "Boston, MA (Onsite)")
+        + listing("R-999999", "99395555111", "Unrelated Role", "New York, NY", "Other Pharma")
+        + "</html>"
+    )
     route = respx.get(ENDPOINT).mock(return_value=httpx.Response(200, text=page))
     respx.get("https://careers.astrazeneca.com/job/43991/99395335280").respond(
-        200, text=detail("R-258358", "Senior Director, Study Start-up", "10/01/2026", "Boston, MA (Hybrid)")
+        200,
+        text=detail(
+            "R-258358", "Senior Director, Study Start-up", "10/01/2026", "Boston, MA (Hybrid)"
+        ),
     )
     respx.get("https://careers.astrazeneca.com/job/43991/99395111222").respond(
-        200, text=detail("R-252260", "Director, Country Operations", "09/27/2026", "Boston, MA (Onsite)")
+        200,
+        text=detail(
+            "R-252260", "Director, Country Operations", "09/27/2026", "Boston, MA (Onsite)"
+        ),
     )
     async with httpx.AsyncClient() as client:
         jobs = await TalentBrewSource(COMPANY, client).fetch()

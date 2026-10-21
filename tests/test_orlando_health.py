@@ -11,7 +11,8 @@ from job_monitor.sources import JibeSource, SOURCE_CLASSES
 
 
 COMPANY = next(
-    company for company in load_companies(Path("config/companies.yml"))
+    company
+    for company in load_companies(Path("config/companies.yml"))
     if company.slug == "orlando-health"
 )
 ENDPOINT = "https://orlandohealth.jibeapply.com/api/jobs"

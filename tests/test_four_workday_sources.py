@@ -73,12 +73,14 @@ async def test_genentech_listing_identity_and_detail_enrichment():
         200,
         json={
             "total": 1,
-            "jobPostings": [{
-                "title": "Clinical Operations Project Specialist",
-                "externalPath": path,
-                "locationsText": "South San Francisco",
-                "bulletFields": [],
-            }],
+            "jobPostings": [
+                {
+                    "title": "Clinical Operations Project Specialist",
+                    "externalPath": path,
+                    "locationsText": "South San Francisco",
+                    "bulletFields": [],
+                }
+            ],
         },
     )
     respx.get(api + path).respond(
@@ -102,6 +104,7 @@ async def test_genentech_listing_identity_and_detail_enrichment():
     assert str(jobs[0].url) == company.ats_config["detail_base_url"] + path
     assert jobs[0].description_raw == "Coordinate regulated clinical operations projects."
     assert jobs[0].metadata["eligibility"]["work_arrangement"] == "Hybrid"
-    assert json.loads(listing.calls[0].request.content)["appliedFacets"] == company.ats_config[
-        "applied_facets"
-    ]
+    assert (
+        json.loads(listing.calls[0].request.content)["appliedFacets"]
+        == company.ats_config["applied_facets"]
+    )

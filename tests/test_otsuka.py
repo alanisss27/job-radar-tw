@@ -12,7 +12,8 @@ from job_monitor.sources import SOURCE_CLASSES, WorkdayRequestController, Workda
 
 
 COMPANY = next(
-    company for company in load_companies(Path("config/companies.yml"))
+    company
+    for company in load_companies(Path("config/companies.yml"))
     if company.slug == "otsuka-pharmaceutical"
 )
 HOST = "vhr-otsuka.wd1.myworkdayjobs.com"
@@ -36,26 +37,40 @@ def test_otsuka_uses_existing_workday_configuration():
 @pytest.mark.asyncio
 @respx.mock
 async def test_otsuka_listing_identity_detail_and_remote_metadata():
-    listing = respx.post(f"{API}/jobs").mock(side_effect=[
-        httpx.Response(200, json={
-            "facets": [{
-                "facetParameter": "locationCountry",
-                "values": [{
-                    "id": "bc33aa3152ec42d4995f4791a106ed09",
-                    "descriptor": "United States of America",
-                }],
-            }],
-        }),
-        httpx.Response(200, json={
-            "total": 1,
-            "jobPostings": [{
-                "title": "Manager, Regulatory Operations",
-                "externalPath": "/job/Remote/Manager-Regulatory-Operations_R12900",
-                "locationsText": "Remote",
-                "remoteType": "Remote",
-            }],
-        }),
-    ])
+    listing = respx.post(f"{API}/jobs").mock(
+        side_effect=[
+            httpx.Response(
+                200,
+                json={
+                    "facets": [
+                        {
+                            "facetParameter": "locationCountry",
+                            "values": [
+                                {
+                                    "id": "bc33aa3152ec42d4995f4791a106ed09",
+                                    "descriptor": "United States of America",
+                                }
+                            ],
+                        }
+                    ],
+                },
+            ),
+            httpx.Response(
+                200,
+                json={
+                    "total": 1,
+                    "jobPostings": [
+                        {
+                            "title": "Manager, Regulatory Operations",
+                            "externalPath": "/job/Remote/Manager-Regulatory-Operations_R12900",
+                            "locationsText": "Remote",
+                            "remoteType": "Remote",
+                        }
+                    ],
+                },
+            ),
+        ]
+    )
     path = "/job/Remote/Manager-Regulatory-Operations_R12900"
     respx.get(f"{API}{path}").respond(
         200,

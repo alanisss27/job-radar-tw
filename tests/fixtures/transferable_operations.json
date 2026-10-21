@@ -1,0 +1,23 @@
+{
+  "provenance": "SYNTHETIC: based only on the Phase 2 task requirements. Not a verified Vetcove JD or a quotation from an employer.",
+  "cases": [
+    {
+      "name": "synthetic_vetcove_like_associate_product_manager_review",
+      "title": "Associate Product Manager",
+      "description": "<p>We accept experience in operations or project coordination as transferable experience for this role.</p><p>Track project milestones and action items.</p><p>Coordinate cross-functional teams.</p><p>Document standard operating procedures.</p><p>This role is fully remote and employees may reside in Florida.</p>",
+      "rejection": null
+    },
+    {
+      "name": "synthetic_senior_software_pm",
+      "title": "Senior Software Product Manager",
+      "description": "Own the software product roadmap and product strategy. Lead engineering delivery. Track project milestones. Coordinate cross-functional teams.",
+      "rejection": "operations_seniority"
+    },
+    {
+      "name": "synthetic_specialized_implementation",
+      "title": "Implementation Specialist",
+      "description": "Track project milestones. Coordinate vendors. Salesforce administration certification is required. Configure API integrations.",
+      "rejection": "operations_specialized_requirement"
+    }
+  ]
+}

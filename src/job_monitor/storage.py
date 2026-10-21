@@ -541,7 +541,7 @@ class Storage:
     def finish_run(
         self,
         run_id: str,
-        stats: dict[str, int],
+        stats: dict,
         errors: list[dict[str, str]],
     ) -> bool:
         status = (
@@ -577,43 +577,56 @@ class Storage:
         if not company_ids:
             return []
         with self.engine.connect() as conn:
-            rows = conn.execute(
-                select(jobs, job_versions.c.payload)
-                .join(job_versions, and_(
-                    job_versions.c.job_id == jobs.c.id,
-                    job_versions.c.content_hash == jobs.c.content_hash,
-                ))
-                .where(
-                    jobs.c.company_id.in_(company_ids),
-                    jobs.c.last_seen_run_id == run_id,
-                    jobs.c.status == "active",
+            rows = (
+                conn.execute(
+                    select(jobs, job_versions.c.payload)
+                    .join(
+                        job_versions,
+                        and_(
+                            job_versions.c.job_id == jobs.c.id,
+                            job_versions.c.content_hash == jobs.c.content_hash,
+                        ),
+                    )
+                    .where(
+                        jobs.c.company_id.in_(company_ids),
+                        jobs.c.last_seen_run_id == run_id,
+                        jobs.c.status == "active",
+                    )
                 )
-            ).mappings().all()
+                .mappings()
+                .all()
+            )
             output = []
             for row in rows:
                 prior_match = conn.execute(
-                    select(match_results.c.id).where(
+                    select(match_results.c.id)
+                    .where(
                         match_results.c.job_id == row["id"],
                         match_results.c.profile == profile,
                         match_results.c.content_hash == row["content_hash"],
                         match_results.c.eligible.is_(True),
-                    ).limit(1)
+                    )
+                    .limit(1)
                 ).scalar_one_or_none()
                 prior_notification = conn.execute(
-                    select(notifications.c.id).where(
+                    select(notifications.c.id)
+                    .where(
                         notifications.c.job_id == row["id"],
                         notifications.c.profile == profile,
                         notifications.c.channel == "telegram",
-                    ).limit(1)
+                    )
+                    .limit(1)
                 ).scalar_one_or_none()
-                output.append({
-                    "job_id": row["id"],
-                    "company_id": row["company_id"],
-                    "content_hash": row["content_hash"],
-                    "payload": row["payload"],
-                    "previously_matched": prior_match is not None,
-                    "previously_notified": prior_notification is not None,
-                })
+                output.append(
+                    {
+                        "job_id": row["id"],
+                        "company_id": row["company_id"],
+                        "content_hash": row["content_hash"],
+                        "payload": row["payload"],
+                        "previously_matched": prior_match is not None,
+                        "previously_notified": prior_notification is not None,
+                    }
+                )
         return output
 
     def company_ids_for_slugs(self, slugs: set[str]) -> dict[str, str]:
@@ -629,55 +642,65 @@ class Storage:
         """Read recovered matches and their durable application/notification state."""
         marker_key = f"clinical-title-backfill-v57547c6-{target_run_key}"
         with self.engine.connect() as conn:
-            marker = conn.execute(
-                select(source_runs).where(source_runs.c.run_key == marker_key)
-            ).mappings().one_or_none()
+            marker = (
+                conn.execute(select(source_runs).where(source_runs.c.run_key == marker_key))
+                .mappings()
+                .one_or_none()
+            )
             if marker is None:
                 raise ValueError(f"No clinical title backfill marker for {target_run_key}")
             if marker["status"] != "success":
                 raise ValueError(f"Clinical title backfill is not complete: {marker['status']}")
-            rows = conn.execute(
-                select(
-                    companies.c.name.label("company"),
-                    jobs.c.id.label("job_id"),
-                    jobs.c.title,
-                    jobs.c.location_raw,
-                    jobs.c.canonical_url,
-                    jobs.c.content_hash,
-                    match_results.c.score,
-                    match_results.c.tier,
-                    match_results.c.details,
-                    applications.c.stage,
-                    applications.c.first_applied_at,
-                    notifications.c.id.label("notification_id"),
-                    notification_outbox.c.message,
+            rows = (
+                conn.execute(
+                    select(
+                        companies.c.name.label("company"),
+                        jobs.c.id.label("job_id"),
+                        jobs.c.title,
+                        jobs.c.location_raw,
+                        jobs.c.canonical_url,
+                        jobs.c.content_hash,
+                        match_results.c.score,
+                        match_results.c.tier,
+                        match_results.c.details,
+                        applications.c.stage,
+                        applications.c.first_applied_at,
+                        notifications.c.id.label("notification_id"),
+                        notification_outbox.c.message,
+                    )
+                    .join(jobs, jobs.c.company_id == companies.c.id)
+                    .join(match_results, match_results.c.job_id == jobs.c.id)
+                    .outerjoin(applications, applications.c.job_id == jobs.c.id)
+                    .outerjoin(
+                        notifications,
+                        and_(
+                            notifications.c.job_id == jobs.c.id,
+                            notifications.c.profile == match_results.c.profile,
+                            notifications.c.channel == "telegram",
+                            notifications.c.version_hash == match_results.c.content_hash,
+                        ),
+                    )
+                    .outerjoin(
+                        notification_outbox,
+                        and_(
+                            notification_outbox.c.job_id == jobs.c.id,
+                            notification_outbox.c.profile == match_results.c.profile,
+                            notification_outbox.c.channel == "telegram",
+                            notification_outbox.c.version_hash == match_results.c.content_hash,
+                        ),
+                    )
+                    .where(
+                        match_results.c.profile == "clinical-discovery",
+                        match_results.c.content_hash == jobs.c.content_hash,
+                        match_results.c.eligible.is_(True),
+                        match_results.c.created_at >= marker["started_at"],
+                        match_results.c.created_at <= marker["finished_at"],
+                    )
+                    .order_by(companies.c.name, jobs.c.title)
                 )
-                .join(jobs, jobs.c.company_id == companies.c.id)
-                .join(match_results, match_results.c.job_id == jobs.c.id)
-                .outerjoin(applications, applications.c.job_id == jobs.c.id)
-                .outerjoin(
-                    notifications,
-                    and_(notifications.c.job_id == jobs.c.id,
-                         notifications.c.profile == match_results.c.profile,
-                         notifications.c.channel == "telegram",
-                         notifications.c.version_hash == match_results.c.content_hash),
-                )
-                .outerjoin(
-                    notification_outbox,
-                    and_(notification_outbox.c.job_id == jobs.c.id,
-                         notification_outbox.c.profile == match_results.c.profile,
-                         notification_outbox.c.channel == "telegram",
-                         notification_outbox.c.version_hash == match_results.c.content_hash),
-                )
-                .where(
-                    match_results.c.profile == "clinical-discovery",
-                    match_results.c.content_hash == jobs.c.content_hash,
-                    match_results.c.eligible.is_(True),
-                    match_results.c.created_at >= marker["started_at"],
-                    match_results.c.created_at <= marker["finished_at"],
-                )
-                .order_by(companies.c.name, jobs.c.title)
-            ).mappings().all()
+                .mappings()
+                .all()
+            )
         candidates = []
         for row in rows:
             details = row["details"] or {}
@@ -702,24 +725,28 @@ class Storage:
                 active_status = "active"
             else:
                 active_status = "unknown"
-            candidates.append({
-                "company": row["company"],
-                "title": row["title"],
-                "location": location,
-                "remote_status": remote_status,
-                "active_status": active_status,
-                "official_url": row["canonical_url"],
-                "score": row["score"],
-                "disposition": f"{row['tier']} / {details.get('bucket', 'target')}",
-                "applied": row["first_applied_at"] is not None
-                           or row["stage"] in {"applied", "interview", "offer"},
-                "notified": row["notification_id"] is not None,
-                "previously_matched": False,
-                "currently_matched": True,
-            })
+            candidates.append(
+                {
+                    "company": row["company"],
+                    "title": row["title"],
+                    "location": location,
+                    "remote_status": remote_status,
+                    "active_status": active_status,
+                    "official_url": row["canonical_url"],
+                    "score": row["score"],
+                    "disposition": f"{row['tier']} / {details.get('bucket', 'target')}",
+                    "applied": row["first_applied_at"] is not None
+                    or row["stage"] in {"applied", "interview", "offer"},
+                    "notified": row["notification_id"] is not None,
+                    "previously_matched": False,
+                    "currently_matched": True,
+                }
+            )
         return {"target_run_key": target_run_key, "candidates": candidates}
 
-    def age_suppressed_job_ids(self, company_id: str, legacy_days: int, min_score: float) -> set[str]:
+    def age_suppressed_job_ids(
+        self, company_id: str, legacy_days: int, min_score: float
+    ) -> set[str]:
         """Infer legacy alert suppression; never use this age test for eligibility.
 
         The old gate stored no rejection reason. Require a current strong eligible
@@ -727,22 +754,50 @@ class Storage:
         The caller intersects these IDs with a fresh verified official-source fetch.
         """
         with self.engine.connect() as conn:
-            rows = conn.execute(
-                select(jobs.c.id, jobs.c.source_posted_at, jobs.c.first_seen_at,
-                       match_results.c.details)
-                .join(match_results, and_(match_results.c.job_id == jobs.c.id,
-                                         match_results.c.content_hash == jobs.c.content_hash))
-                .where(jobs.c.company_id == company_id, jobs.c.status == "active",
-                       jobs.c.source_posted_at.is_not(None), match_results.c.eligible.is_(True),
-                       match_results.c.tier == "strong", match_results.c.score >= min_score,
-                       ~exists(select(notifications.c.id).where(notifications.c.job_id == jobs.c.id)),
-                       ~exists(select(notification_outbox.c.id).where(notification_outbox.c.job_id == jobs.c.id)))
-            ).mappings().all()
+            rows = (
+                conn.execute(
+                    select(
+                        jobs.c.id,
+                        jobs.c.source_posted_at,
+                        jobs.c.first_seen_at,
+                        match_results.c.details,
+                    )
+                    .join(
+                        match_results,
+                        and_(
+                            match_results.c.job_id == jobs.c.id,
+                            match_results.c.content_hash == jobs.c.content_hash,
+                        ),
+                    )
+                    .where(
+                        jobs.c.company_id == company_id,
+                        jobs.c.status == "active",
+                        jobs.c.source_posted_at.is_not(None),
+                        match_results.c.eligible.is_(True),
+                        match_results.c.tier == "strong",
+                        match_results.c.score >= min_score,
+                        ~exists(
+                            select(notifications.c.id).where(notifications.c.job_id == jobs.c.id)
+                        ),
+                        ~exists(
+                            select(notification_outbox.c.id).where(
+                                notification_outbox.c.job_id == jobs.c.id
+                            )
+                        ),
+                    )
+                )
+                .mappings()
+                .all()
+            )
         return {
-            row["id"] for row in rows
+            row["id"]
+            for row in rows
             if row["details"].get("bucket", "target") == "target"
-            and (row["first_seen_at"].replace(tzinfo=UTC)
-                 - row["source_posted_at"].replace(tzinfo=UTC)).days > legacy_days
+            and (
+                row["first_seen_at"].replace(tzinfo=UTC)
+                - row["source_posted_at"].replace(tzinfo=UTC)
+            ).days
+            > legacy_days
         }
 
     def has_jobs(self, company_id: str) -> bool:
@@ -1663,20 +1718,26 @@ class Storage:
                 if len(claimed) >= limit:
                     break
                 if eligibility_check is not None:
-                    payload = conn.execute(select(job_versions.c.payload).where(
-                        job_versions.c.job_id == row["job_id"],
-                        job_versions.c.content_hash == row["version_hash"],
-                    )).scalar_one_or_none()
+                    payload = conn.execute(
+                        select(job_versions.c.payload).where(
+                            job_versions.c.job_id == row["job_id"],
+                            job_versions.c.content_hash == row["version_hash"],
+                        )
+                    ).scalar_one_or_none()
                     try:
-                        rejected = eligibility_check(RawJob.model_validate(payload)) if payload else [
-                            "eligibility_unknown: queued posting payload unavailable"
-                        ]
+                        rejected = (
+                            eligibility_check(RawJob.model_validate(payload))
+                            if payload
+                            else ["eligibility_unknown: queued posting payload unavailable"]
+                        )
                     except ValueError:
                         rejected = ["eligibility_unknown: invalid queued posting payload"]
                     if rejected:
-                        conn.execute(update(notification_outbox).where(
-                            notification_outbox.c.id == row["id"]
-                        ).values(last_error="; ".join(rejected)[:1000]))
+                        conn.execute(
+                            update(notification_outbox)
+                            .where(notification_outbox.c.id == row["id"])
+                            .values(last_error="; ".join(rejected)[:1000])
+                        )
                         continue
                 claim_token = str(uuid.uuid4())
                 updated = conn.execute(
@@ -1718,10 +1779,12 @@ class Storage:
     def notification_job(self, job_id: str, content_hash: str) -> RawJob | None:
         """Read the exact queued version for current candidate eligibility checks."""
         with self.engine.connect() as conn:
-            payload = conn.execute(select(job_versions.c.payload).where(
-                job_versions.c.job_id == job_id,
-                job_versions.c.content_hash == content_hash,
-            )).scalar_one_or_none()
+            payload = conn.execute(
+                select(job_versions.c.payload).where(
+                    job_versions.c.job_id == job_id,
+                    job_versions.c.content_hash == content_hash,
+                )
+            ).scalar_one_or_none()
         return RawJob.model_validate(payload) if payload else None
 
     def notification_claim_is_valid(self, run_id: str, outbox_id: str, claim_token: str) -> bool:
