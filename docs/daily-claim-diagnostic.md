@@ -28,3 +28,44 @@ it. Standard review and protection of `main` and repository Actions permissions
 remain essential. A dedicated SELECT-only role would strengthen isolation but
 requires separately approved credential/configuration work. No workflow has been
 dispatched as part of adding this diagnostic.
+
+Isolated PostgreSQL verification
+-------------------------------
+
+`tests/test_claim_diagnostic_postgres.py` is an opt-in live integration suite.
+Provision a disposable local PostgreSQL cluster listening only on `127.0.0.1`
+on port `55435`, with a non-superuser login role `claim_test_owner` owning the
+database `claim_diagnostic_test`. Use local test authentication only; never copy
+production credentials into this cluster. The suite does not read `DATABASE_URL`
+for its connection. Its hostname, database name, and role are fixed test values;
+the optional `CLAIM_DIAGNOSTIC_TEST_PORT` must be a non-default, unprivileged port.
+
+Set `CLAIM_DIAGNOSTIC_POSTGRES_TEST=1` and run
+`python -m pytest tests/test_claim_diagnostic_postgres.py -q`. Without explicit
+opt-in the live tests skip. The fixture creates/drops `public.source_runs` in
+that test database, so never use a database containing valuable data.
+
+The live suite checks absent/success/running/failed/partial rows, parameter binding,
+read-only startup defaults, explicit transaction read-only mode, rollback/close
+on success and query/result errors, unchanged row snapshots, and PostgreSQL
+rejection of deliberately substituted INSERT/UPDATE/DELETE/DDL statements using
+the write-capable table owner. A subprocess executes the standalone entry point
+with monitor/storage/pipeline/source/notifier imports forbidden. The unit suite
+also verifies closing the connection if rollback itself raises.
+
+Read-only mode prevents ordinary changes to permanent tables; it is not a
+sandbox against malicious code that intentionally resets transaction settings,
+uses separate connections, or invokes privileged external side effects. The
+diagnostic contains only its fixed SELECT and read-only setting check. Future
+hardening should give a dedicated diagnostic login only CONNECT, public schema
+USAGE, and SELECT on the required `source_runs` columns, without table ownership,
+write/DDL grants, role inheritance permitting writes, or privileged function
+execution. That credential change requires separate approval.
+
+Pre-merge verification on October 22, 2026 used PostgreSQL 17.11 in a disposable
+loopback-only cluster with a non-superuser table owner holding write privileges.
+All 14 live tests passed, including server-enforced rejection of writes and
+unchanged data on error paths. The combined diagnostic, storage, and scheduling
+suite passed 94 tests with live tests explicitly enabled. Repository-wide Ruff
+lint/formatting and Actionlint for the diagnostic workflow also passed. Production
+credentials and databases were not used; no production workflow was dispatched.

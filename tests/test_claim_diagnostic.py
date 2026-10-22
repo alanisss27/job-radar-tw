@@ -161,3 +161,27 @@ def test_workflow_is_isolated_and_uses_env_input():
 def test_unknown_database_status_is_not_disclosed():
     with pytest.raises(ValueError, match="Unrecognized claim status"):
         diagnostic.claim_report(KEY, row("sensitive unexpected value"))
+
+
+def test_connection_closed_even_when_rollback_fails(monkeypatch):
+    conn = ReadOnlyConnection(row("success"))
+
+    def failed_rollback():
+        conn.rolled_back = True
+        raise RuntimeError("Connection lost during rollback")
+
+    monkeypatch.setattr(conn, "rollback", failed_rollback)
+    monkeypatch.setattr(diagnostic.psycopg, "connect", lambda *a, **kw: conn)
+    with pytest.raises(RuntimeError, match="Connection lost"):
+        diagnostic.inspect_claim("postgresql://example.invalid/db", KEY)
+    assert conn.rolled_back and conn.closed
+
+
+@pytest.mark.parametrize("url", ["", "sqlite:///database.db", "host=private dbname=private"])
+def test_unsupported_database_never_connects(monkeypatch, url):
+    def forbidden(*args, **kwargs):
+        pytest.fail("Unsupported connection must not be opened")
+
+    monkeypatch.setattr(diagnostic.psycopg, "connect", forbidden)
+    with pytest.raises(ValueError):
+        diagnostic.inspect_claim(url, KEY)
