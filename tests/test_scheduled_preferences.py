@@ -182,8 +182,8 @@ def test_workflow_private_validation_does_not_log_input(tmp_path, payload, valid
         (
             "Remote Canada",
             "This role is fully remote.",
-            "review_needed",
-            "remote_residence_unknown",
+            "unsuitable",
+            "remote_residence_incompatible",
         ),
         ("Orlando, FL", "This role is onsite.", "review_needed", "commute_not_verified"),
         (

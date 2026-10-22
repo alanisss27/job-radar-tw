@@ -109,7 +109,21 @@ def render_job_message(
         changed=changed,
         display_timezone=display_timezone,
     )
+    assessment = result.candidate_eligibility
+    eligibility_note = ""
+    if assessment is not None:
+        if assessment.status == "eligible":
+            eligibility_note = "Eligibility: confirmed by configured checks.\n"
+        else:
+            status = (
+                "review needed; NOT confirmed eligible"
+                if assessment.status == "review_needed"
+                else "ineligible"
+            )
+            details = "; ".join(assessment.hard_reasons + assessment.review_reasons)
+            eligibility_note = f"Eligibility: {status}. {html.escape(details)}\n"
     if result.profile == "clinical-discovery":
+        location_note = eligibility_note or "地點篩選：通過設定條件；非地理適配評分\n"
         evidence = (
             "、".join(
                 reason
@@ -131,7 +145,7 @@ def render_job_message(
             f"<b>{html.escape(company_name)} - {html.escape(job.raw.title)}</b>\n"
             f"📍 {html.escape(job.raw.location_raw or '未提供')}\n"
             f"探索依據：{html.escape(evidence)}\n"
-            "地點篩選：通過設定條件；非地理適配評分\n"
+            f"{location_note}"
             f"待確認要求：{html.escape(reviews)}\n"
             f"自動檢查提示：{html.escape(checks)}\n"
             "適配說明：探索相關度不代表候選人適配；由 Career-ops 深評後自行決定。\n"
@@ -142,6 +156,7 @@ def render_job_message(
         f"{badge} | {html.escape(str(result.profile))} | {result.score:.0%}\n"
         f"<b>{html.escape(company_name)} - {html.escape(job.raw.title)}</b>\n"
         f"📍 {html.escape(job.raw.location_raw or '未提供')}\n"
+        f"{eligibility_note}"
         f"命中：{html.escape(reasons)}\n"
         f"缺口：{html.escape(gaps)}\n"
         f"新鮮度：{html.escape(freshness)}\n"

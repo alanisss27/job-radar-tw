@@ -248,6 +248,20 @@ def _location_key(value: str) -> str:
     return " ".join(re.sub(r"[^\w]+", " ", text).split())
 
 
+# Full country names only: never infer countries from cities or state-like codes.
+_FOREIGN_COUNTRY = r"\b(?:India|Australia|Canada|United Kingdom|New Zealand)\b"
+
+
+def _foreign_only_location(label: str) -> bool:
+    alternatives = re.split(r";|\||/|\bor\b", label, flags=re.I)
+    return bool(alternatives) and all(
+        re.search(_FOREIGN_COUNTRY, part, re.I)
+        and not location_states(part)
+        and not re.search(r"\b(?:United States|USA|US|worldwide|global)\b", part, re.I)
+        for part in alternatives
+    )
+
+
 def remote_rejections(raw: RawJob, preferences: SearchPreferences) -> list[str]:
     cfg = preferences.candidate_eligibility
     if not preferences.include_remote:
@@ -310,6 +324,71 @@ def remote_rejections(raw: RawJob, preferences: SearchPreferences) -> list[str]:
             ) and not re.search(r"United States|\bUS\b|\bUSA\b|U\.S\.", clause):
                 unknown.append(f"remote_residence_unknown: {clause}")
     restrictions = [states for states in restrictions if states]
+    foreign = [raw.location_raw] if _foreign_only_location(raw.location_raw) else []
+    required_foreign = []
+    for clause in clauses(raw.description_raw):
+        # Applicant residence requirements only; HQ, customers and travel are not scope.
+        if (
+            (
+                re.search(
+                    r"(?:^|\byou\s+)must\s+(?:reside|be (?:based|located))\s+in\b"
+                    r"|\b(?:applicants|candidates|employees)\s+(?:must|are required to)\s+"
+                    r"(?:reside|be (?:based|located))\s+in\b"
+                    r"|\b(?:remote|residence|applicants|candidates)\s*[:\-]?\s*"
+                    + _FOREIGN_COUNTRY
+                    + r"\s+only\b",
+                    clause,
+                    re.I,
+                )
+                or re.fullmatch(_FOREIGN_COUNTRY + r"\s+only[.!]?", clause, re.I)
+            )
+            and _foreign_only_location(clause)
+            and not re.search(
+                r"\b(?:not required|need not|do not need to|not limited|not restricted"
+                r"|travel|visits?)\b",
+                clause,
+                re.I,
+            )
+        ):
+            required_foreign.append(clause)
+    compatible_alternative = any(
+        (
+            states_in(clause)
+            and cfg.residence_state in states_in(clause)
+            or re.search(r"\b(?:United States|USA|US)\b", clause, re.I)
+        )
+        and re.search(
+            r"\b(?:may|can)\s+(?:reside|be based|be located)\b"
+            r"|\b(?:applicants|candidates|employees)\b.*\b(?:also eligible|also accepted)\b",
+            clause,
+            re.I,
+        )
+        and not re.search(r"\b(?:not|cannot|excluding|except)\b", clause, re.I)
+        for clause in clauses(raw.description_raw)
+    )
+    if required_foreign and not compatible_alternative:
+        return [
+            "remote_residence_incompatible: explicit foreign-only residence requirement: "
+            + " | ".join(required_foreign)
+        ]
+    if required_foreign:
+        unknown.append("remote_residence_unknown: conflicting applicant residence requirements")
+    if foreign:
+        if (
+            compatible_alternative
+            or required_foreign
+            or restrictions
+            or re.search(
+                r"\b(?:United States|USA|US|worldwide|global)\b",
+                " ".join(scope_evidence),
+                re.I,
+            )
+        ):
+            unknown.append("remote_residence_unknown: conflicting US and foreign scope")
+        else:
+            return [
+                "remote_residence_incompatible: explicit foreign-only scope: " + " | ".join(foreign)
+            ]
     if restrictions or excluded:
         if not cfg.residence_state:
             return ["remote_residence_unknown: candidate residence state not configured"]
@@ -445,6 +524,18 @@ def _physical_assessment(
             re.I,
         )
         mandatory.extend(site[1] for site in sites)
+        if (
+            re.search(
+                r"(?:^|\byou\s+|\b(?:employees|applicants|candidates)\s+)"
+                r"(?:must|are required to)\s+(?:work|attend|report)\b",
+                clause,
+                re.I,
+            )
+            and re.search(PHYSICAL + r"|\boffice\b|\bsite\b", clause, re.I)
+            and _foreign_only_location(clause)
+            and not re.search(r"\b(?:travel|visits?|meetings?)\b", clause, re.I)
+        ):
+            mandatory.append(clause)
     all_labels = list(dict.fromkeys(labels + mandatory))
     possible = policy.onsite_states
     expanded = None if possible is None else possible | policy.limited_attendance_states
@@ -468,7 +559,10 @@ def _physical_assessment(
         )
 
     def incompatible(loc: LocationEvidence) -> bool:
-        return bool(allowed is not None and loc.states and not set(loc.states) & allowed)
+        return bool(
+            allowed is not None
+            and (_foreign_only_location(loc.label) or loc.states and not set(loc.states) & allowed)
+        )
 
     # A separately required site is not an alternative to the listing location.
     mandatory_bad = [
