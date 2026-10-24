@@ -568,35 +568,104 @@ class WorkdaySource(JobSource):
                     for key, ids in resolved.items()
                 }
             )
+        strict = cfg.get("strict_pagination", False)
         limit = int(cfg.get("limit", 20))
+        if strict and not 1 <= limit <= 20:
+            raise SourceError("Workday strict pagination requires a limit between 1 and 20")
+        facet_queries = [applied_facets]
+        batch_size = cfg.get("location_facet_batch_size")
+        if batch_size is not None:
+            if not isinstance(batch_size, int) or isinstance(batch_size, bool) or batch_size < 1:
+                raise SourceError("Workday location_facet_batch_size must be a positive integer")
+            location_key = (
+                resolved_facet_keys.get("locations", "locations") if patterns else "locations"
+            )
+            location_ids = applied_facets.get(location_key)
+            if not location_ids:
+                raise SourceError("Workday location batching requires resolved location IDs")
+            facet_queries = [
+                {**applied_facets, location_key: location_ids[start : start + batch_size]}
+                for start in range(0, len(location_ids), batch_size)
+            ]
         jobs: list[RawJob] = []
         seen: set[str] = set()
         search_texts = cfg.get("search_texts") or [""]
-        for search_text in search_texts:
+        for search_text, query_facets in (
+            (text, facets) for text in search_texts for facets in facet_queries
+        ):
             offset = 0
             reported_total: int | None = None
-            while True:
-                response = await self._request(
-                    "POST",
-                    endpoint,
-                    json={
-                        "appliedFacets": applied_facets,
-                        "limit": limit,
-                        "offset": offset,
-                        "searchText": search_text,
-                    },
+            query_seen: set[str] = set()
+
+            def incomplete(reason: str) -> None:
+                raise SourceError(
+                    f"Workday incomplete coverage for {self.company.slug}: {reason}; "
+                    f"search={search_text!r}, query={facet_queries.index(query_facets) + 1}/"
+                    f"{len(facet_queries)}, offset={offset}, unique={len(query_seen)}, "
+                    f"reported_total={reported_total}. No full coverage claimed; "
+                    "possible result window, board changes, or invalid pagination."
                 )
-                payload = response.json()
+
+            while True:
+                try:
+                    response = await self._request(
+                        "POST",
+                        endpoint,
+                        json={
+                            "appliedFacets": query_facets,
+                            "limit": limit,
+                            "offset": offset,
+                            "searchText": search_text,
+                        },
+                    )
+                except (WorkdayRequestError, httpx.HTTPError) as exc:
+                    if strict:
+                        incomplete(f"listing request failed: {exc}")
+                    raise
+                try:
+                    payload = response.json()
+                except ValueError:
+                    if strict:
+                        incomplete("listing response is not JSON")
+                    raise
                 if not isinstance(payload, dict) or not isinstance(
                     payload.get("jobPostings"), list
                 ):
+                    if strict:
+                        incomplete("response has no valid jobPostings list")
                     raise SourceError(
                         f"Workday response for {self.company.slug} has no valid jobPostings list"
                     )
                 page_total = payload.get("total")
+                if strict:
+                    if offset == 0 and (type(page_total) is not int or page_total < 0):
+                        incomplete("missing or invalid initial total")
+                    if (
+                        reported_total is not None
+                        and type(page_total) is int
+                        and page_total > 0
+                        and page_total != reported_total
+                    ):
+                        incomplete(f"total changed to {page_total}")
                 if isinstance(page_total, int) and page_total > 0:
                     reported_total = page_total
+                elif strict and offset == 0:
+                    reported_total = page_total
                 postings = payload["jobPostings"]
+                if strict:
+                    paths = [
+                        item.get("externalPath") if isinstance(item, dict) else None
+                        for item in postings
+                    ]
+                    if any(not _usable_text(path) for path in paths):
+                        incomplete("posting has no usable identity")
+                    if len(set(paths)) != len(paths) or query_seen.intersection(paths):
+                        incomplete("duplicate or stalled page")
+                    query_seen.update(paths)
+                    if len(postings) > limit or len(query_seen) > reported_total:
+                        incomplete("page exceeds requested limit or reported total")
+                    if len(postings) < limit and len(query_seen) != reported_total:
+                        incomplete("short or empty page before reported total")
                 for item in postings:
                     if not isinstance(item, dict):
                         _warn_skipped_item("Workday", self.company.slug, "not an object", item)
