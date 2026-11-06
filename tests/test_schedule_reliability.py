@@ -21,6 +21,40 @@ from job_monitor.storage import Storage, source_runs
 ET = ZoneInfo("America/New_York")
 
 
+@pytest.mark.parametrize(
+    "timestamp,allowed",
+    [
+        ("2026-11-04T19:56:05+00:00", True),
+        ("2026-11-05T20:09:22+00:00", True),
+        ("2026-11-06T19:35:38+00:00", True),
+        ("2026-11-02T21:49:48+00:00", True),
+        ("2026-11-06T21:59:59+00:00", True),
+        ("2026-11-06T22:00:00+00:00", False),
+        ("2026-11-07T05:00:00+00:00", False),
+        ("2026-07-06T20:59:59+00:00", True),
+        ("2026-07-06T21:00:00+00:00", False),
+        ("2026-11-01T21:59:59+00:00", True),
+        ("2026-11-01T22:00:00+00:00", False),
+    ],
+)
+def test_production_window_covers_observed_delayed_invocations(timestamp, allowed):
+    workflow = yaml.safe_load(Path(".github/workflows/monitor.yml").read_text(encoding="utf-8"))
+    step = next(
+        step
+        for step in workflow["jobs"]["monitor"]["steps"]
+        if step.get("name") == "Run scheduled monitor"
+    )
+    env = step["env"]
+    now = datetime.fromisoformat(timestamp)
+    key = scheduled_run_key(
+        now,
+        timezone=env["MONITOR_TIMEZONE"],
+        hour=int(env["MONITOR_HOUR"]),
+        grace_hours=int(env["SCHEDULE_GRACE_HOURS"]),
+    )
+    assert key == (f"daily-{now.astimezone(ET).date()}" if allowed else None)
+
+
 @pytest.fixture(autouse=True)
 def no_http(monkeypatch):
     async def forbidden(*args, **kwargs):
@@ -313,7 +347,7 @@ def test_workflow_policy_and_summary_execution(tmp_path, monkeypatch):
     ]
     steps = workflow["jobs"]["monitor"]["steps"]
     monitor = next(s for s in steps if s.get("name") == "Run scheduled monitor")
-    assert monitor["env"]["SCHEDULE_GRACE_HOURS"] == "8"
+    assert monitor["env"]["SCHEDULE_GRACE_HOURS"] == "10"
     assert '--status-file "${RUNNER_TEMP}/job-radar-scan-status.json"' in monitor["run"]
     step = next(s for s in steps if s.get("name") == "Summarize scheduled scan outcome")
     assert step["if"] == "always() && github.event_name == 'schedule'"

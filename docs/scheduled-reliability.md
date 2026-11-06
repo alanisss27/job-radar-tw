@@ -1,9 +1,9 @@
 # Scheduled scan reliability
 
 Production keeps the existing 07:30, 08:30 and 09:30 America/New_York cron.
-Scheduled invocation admission is 07:00 inclusive to 15:00 exclusive on the
-current local day (`MONITOR_HOUR=7`, `SCHEDULE_GRACE_HOURS=8`). Admission is
-checked once; a scan admitted before 15:00 may finish later. Other callers retain
+Scheduled invocation admission is 07:00 inclusive to 17:00 exclusive on the
+current local day (`MONITOR_HOUR=7`, `SCHEDULE_GRACE_HOURS=10`). Admission is
+checked once; a scan admitted before 17:00 may finish later. Other callers retain
 their existing grace-period defaults and explicit run-key override behavior.
 
 The existing daily database key prevents another scan after a successful run or
@@ -35,3 +35,8 @@ late. Existing outbox, limits, eligibility and matching behavior are unchanged.
 Retries can repeat summaries, and Telegram acceptance followed by a crash before
 database acknowledgement can repeat an individual message. This patch does not
 provide exactly-once delivery or recover a trigger GitHub never creates.
+
+The November 5, 2026 scheduled invocation arrived at 15:09 New York time and
+was rejected by the former 15:00 cutoff. The ten-hour window also covers the
+16:49 arrival observed on November 2. This changes admission only; cron, daily
+claims, matching, and delivery rules remain unchanged.
