@@ -7,7 +7,7 @@ import respx
 from job_monitor.active_status import ActiveStatus
 from job_monitor.config import load_companies
 from job_monitor.models import AtsType, RawJob
-from job_monitor.sources import CharterResearchSource, SOURCE_CLASSES, SourceRunner
+from job_monitor.sources import CharterResearchSource, SOURCE_CLASSES, SourceError, SourceRunner
 
 
 COMPANY = next(
@@ -97,3 +97,38 @@ def test_charter_config_and_source_registration():
     assert COMPANY.enabled and COMPANY.source_verified
     assert COMPANY.profiles == ["clinical-discovery"]
     assert SOURCE_CLASSES[AtsType.CHARTER_RESEARCH] is CharterResearchSource
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_charter_loads_current_public_job_table():
+    respx.get(LISTING).respond(
+        200, text='<div data-load-careers="fetch_careers_jobs_markup">Loading careers...</div>'
+    )
+    loader = respx.post("https://www.charterresearch.com/wp-admin/admin-ajax.php").respond(
+        200,
+        text='<table class="careers-table">'
+        + row("638046198", "Client Services", "Orlando")
+        + "</table>",
+    )
+    async with httpx.AsyncClient() as client:
+        jobs = await CharterResearchSource(COMPANY, client).fetch()
+    assert loader.calls[0].request.content == b"action=fetch_careers_jobs_markup"
+    assert len(jobs) == 1
+    assert jobs[0].location_raw == "Orlando"
+    assert len(respx.calls) == 2
+
+
+@pytest.mark.asyncio
+@respx.mock
+@pytest.mark.parametrize("status, content", [(200, "0"), (503, "Unavailable")])
+async def test_charter_loader_failure_never_becomes_successful_empty_inventory(status, content):
+    respx.get(LISTING).respond(
+        200, text='<div data-load-careers="fetch_careers_jobs_markup"></div>'
+    )
+    respx.post("https://www.charterresearch.com/wp-admin/admin-ajax.php").respond(
+        status, text=content
+    )
+    async with httpx.AsyncClient() as client:
+        with pytest.raises((SourceError, httpx.HTTPStatusError)):
+            await CharterResearchSource(COMPANY, client).fetch()

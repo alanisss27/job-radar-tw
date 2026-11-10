@@ -184,3 +184,29 @@ async def test_lilly_phenom_payload_and_offset_pagination_need_no_inventory_deta
     assert [job.external_job_id for job in jobs] == ["LILLYUS1ENUS", "LILLYUS2ENUS"]
     assert str(jobs[0].url) == ("https://careers.lilly.com/us/en/job/R-1001/research-scientist")
     assert jobs[0].metadata["phenom"]["job_id"] == "R-1001"
+
+
+@pytest.mark.asyncio
+@respx.mock
+@pytest.mark.parametrize("has_location", [True, False])
+async def test_exact_lilly_listing_preserves_location_and_fails_closed_when_missing(has_location):
+    # November 9 upstream payload has UK location evidence; historical missing
+    # evidence must still abort the inventory instead of silently dropping a job.
+    location = "BASINGSTOKE, Hampshire, United Kingdom" if has_location else ""
+    listing = item(
+        "LILLUSR113187EXTERNALENUS",
+        "R-113187",
+        title="Senior Director, European Regulatory Strategy Lead",
+        location=location,
+        cityStateCountry=location,
+        multi_location=[location] if location else [],
+    )
+    respx.get(LILLY_LISTING + "?s=1").respond(200, text=page([listing], 1, listing=LILLY_LISTING))
+    async with httpx.AsyncClient() as client:
+        source = PhenomSource(LILLY, client)
+        if has_location:
+            jobs = await source.fetch()
+            assert jobs[0].location_raw == location
+        else:
+            with pytest.raises(SourceError, match="LILLUSR113187EXTERNALENUS has no location data"):
+                await source.fetch()

@@ -219,7 +219,7 @@ companies:
       detail_api_base: https://vhr-otsuka.wd1.myworkdayjobs.com/wday/cxs/vhr_otsuka/External
       limit: 20
       facet_patterns:
-        locations: '(?i)^(?:Remote(?:-Sales)?|.*United States(?: of America)?.*)$'
+        locations: '(?i)^(?:Remote(?:-Sales)?|Princeton, NJ|Rockville, MD|.*United States(?: of America)?.*)$'
       location_facet_parameter: locationCountry
       validate_location_facets: true
       location_facet_country: United States of America

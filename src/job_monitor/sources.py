@@ -2177,8 +2177,24 @@ class CharterResearchSource(JobSource):
     async def fetch(self) -> list[RawJob]:
         endpoint = str(self.company.ats_config["listing_endpoint"])
         response = await self._get(endpoint)
+        content = response.text
+        if BeautifulSoup(content, "html.parser").select_one(
+            '[data-load-careers="fetch_careers_jobs_markup"]'
+        ):
+            # Charter moved the existing table behind its public WordPress loader.
+            ajax_url = urljoin(endpoint, "/wp-admin/admin-ajax.php")
+            loaded = await self.client.post(
+                ajax_url,
+                data={"action": "fetch_careers_jobs_markup"},
+                timeout=20,
+                follow_redirects=True,
+            )
+            loaded.raise_for_status()
+            content = loaded.text
+            if not BeautifulSoup(content, "html.parser").select_one("table.careers-table"):
+                raise SourceError("Charter careers loader did not return the job table")
         jobs: list[RawJob] = []
-        for item in self._listing_items(response.text, endpoint):
+        for item in self._listing_items(content, endpoint):
             metadata = {
                 "charter_research": {
                     "detail_url": item["url"],
@@ -2483,6 +2499,18 @@ class TalentBrewSource(JobSource):
             if page_number > 1:
                 page_params[page_parameter] = page_number
             html = await self._get(self._query_url(endpoint, page_params))
+            if self.company.slug == "alexion-astrazeneca-rare-disease":
+                try:
+                    envelope = json.loads(html)
+                except ValueError:
+                    envelope = None
+                if isinstance(envelope, dict):
+                    # The live results endpoint can claim jobs while omitting its
+                    # HTML. Never report that incomplete response as an empty board.
+                    raise SourceError(
+                        "Alexion TalentBrew returned a results envelope without "
+                        "a verified complete inventory"
+                    )
             rows = self._parse_listings(
                 html,
                 endpoint,

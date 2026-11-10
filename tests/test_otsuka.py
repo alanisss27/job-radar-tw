@@ -98,3 +98,59 @@ async def test_otsuka_listing_identity_detail_and_remote_metadata():
     assert json.loads(listing.calls[1].request.content)["appliedFacets"] == {
         "locationCountry": ["bc33aa3152ec42d4995f4791a106ed09"]
     }
+
+
+@pytest.mark.asyncio
+@respx.mock
+@pytest.mark.parametrize(
+    "country, accepted", [("United States of America", True), ("Canada", False), (None, False)]
+)
+@pytest.mark.parametrize("location", ["Princeton, NJ", "Rockville, MD"])
+async def test_otsuka_city_labels_still_require_explicit_us_country(country, accepted, location):
+    path = "/job/Princeton-NJ/Associate--Systems-Analyst_R13232"
+    respx.post(f"{API}/jobs").mock(
+        side_effect=[
+            httpx.Response(
+                200,
+                json={
+                    "facets": [
+                        {
+                            "facetParameter": "locationCountry",
+                            "values": [{"id": "us", "descriptor": "United States of America"}],
+                        }
+                    ]
+                },
+            ),
+            httpx.Response(
+                200,
+                json={
+                    "total": 1,
+                    "jobPostings": [
+                        {
+                            "title": "Associate, Systems Analyst",
+                            "externalPath": path,
+                            "locationsText": location,
+                        }
+                    ],
+                },
+            ),
+        ]
+    )
+    respx.get(f"{API}{path}").respond(
+        200,
+        json={
+            "jobPostingInfo": {
+                "location": location,
+                "country": {"descriptor": country},
+                "jobDescription": "Systems analysis.",
+            }
+        },
+    )
+    async with httpx.AsyncClient() as client:
+        source = WorkdaySource(COMPANY, client, WorkdayRequestController(min_interval_seconds=0))
+        jobs = await source.fetch()
+    assert len(jobs) == int(accepted)
+    assert len(source.warnings) == int(not accepted)
+    if accepted:
+        assert jobs[0].metadata["workday_locations"]["primary"] == location
+        assert not jobs[0].metadata.get("eligibility", {}).get("work_arrangement")
