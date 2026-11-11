@@ -119,8 +119,8 @@ jobs:
           VISA_SPONSORSHIP_REQUIRED: ${{ vars.VISA_SPONSORSHIP_REQUIRED || 'false' }}
           MONITOR_TIMEZONE: America/New_York
           MONITOR_HOUR: "7"
-          # Same-day catch-up: 07:00 inclusive to 15:00 exclusive, New York time.
-          SCHEDULE_GRACE_HOURS: "8"
+          # Same-day catch-up: 07:00 inclusive to next midnight exclusive, New York time.
+          SCHEDULE_GRACE_HOURS: "17"
           IMMEDIATE_NOTIFICATION_MIN_SCORE: ${{ vars.IMMEDIATE_NOTIFICATION_MIN_SCORE || '0.82' }}
           IMMEDIATE_NOTIFICATION_MAX_SOURCE_AGE_DAYS: ${{ vars.IMMEDIATE_NOTIFICATION_MAX_SOURCE_AGE_DAYS || '21' }}
           IMMEDIATE_NOTIFICATION_MAX_PER_RUN: ${{ vars.IMMEDIATE_NOTIFICATION_MAX_PER_RUN || '5' }}

@@ -50,7 +50,7 @@ def test_same_day_catch_up_boundaries(date, time, allowed):
     assert datetime.fromisoformat(decision["cutoff_exclusive"]) == now.replace(hour=15, minute=0)
 
 
-def frozen_cli(monkeypatch, now):
+def frozen_cli(monkeypatch, now, *, grace_hours=8):
     class Clock(datetime):
         @classmethod
         def now(cls, tz=None):
@@ -58,7 +58,7 @@ def frozen_cli(monkeypatch, now):
 
     settings = Settings(
         _env_file=None,
-        schedule_grace_hours=8,
+        schedule_grace_hours=grace_hours,
         telegram_bot_token="synthetic",
         telegram_chat_id="synthetic",
     )
@@ -313,7 +313,7 @@ def test_workflow_policy_and_summary_execution(tmp_path, monkeypatch):
     ]
     steps = workflow["jobs"]["monitor"]["steps"]
     monitor = next(s for s in steps if s.get("name") == "Run scheduled monitor")
-    assert monitor["env"]["SCHEDULE_GRACE_HOURS"] == "8"
+    assert monitor["env"]["SCHEDULE_GRACE_HOURS"] == "17"
     assert '--status-file "${RUNNER_TEMP}/job-radar-scan-status.json"' in monitor["run"]
     step = next(s for s in steps if s.get("name") == "Summarize scheduled scan outcome")
     assert step["if"] == "always() && github.event_name == 'schedule'"
@@ -329,3 +329,81 @@ def test_workflow_policy_and_summary_execution(tmp_path, monkeypatch):
     (tmp_path / "job-radar-scan-status.json").write_text(json.dumps(report.scan_status()))
     exec(compile(code, "workflow-summary", "exec"), {})
     assert "skipped_daily_claim_unavailable" in summary.read_text()
+
+
+@pytest.mark.parametrize(
+    "timestamp,allowed",
+    [
+        ("2026-11-02T21:49:48+00:00", True),
+        ("2026-11-05T20:09:22+00:00", True),
+        ("2026-11-09T22:34:57+00:00", True),
+        # EST: admission starts at 07:00 and closes exactly at local midnight.
+        ("2026-11-09T11:59:59+00:00", False),
+        ("2026-11-09T12:00:00+00:00", True),
+        ("2026-11-10T04:59:59.999999+00:00", True),
+        ("2026-11-10T05:00:00+00:00", False),
+        ("2026-11-10T05:00:00.000001+00:00", False),
+        # EDT has a different UTC cutoff, with the same local-day contract.
+        ("2026-07-06T10:59:59+00:00", False),
+        ("2026-07-06T11:00:00+00:00", True),
+        ("2026-07-07T03:59:59.999999+00:00", True),
+        ("2026-07-07T04:00:00+00:00", False),
+        # Spring-forward: skipped hours never open a previous-day window.
+        ("2026-03-08T06:59:59+00:00", False),
+        ("2026-03-08T07:00:00+00:00", False),
+        ("2026-03-08T10:59:59+00:00", False),
+        ("2026-03-08T11:00:00+00:00", True),
+        ("2026-03-09T03:59:59.999999+00:00", True),
+        ("2026-03-09T04:00:00+00:00", False),
+        # Fall-back: both repeated 01:30 instants remain outside admission.
+        ("2026-11-01T05:30:00+00:00", False),
+        ("2026-11-01T06:30:00+00:00", False),
+        ("2026-11-01T11:59:59+00:00", False),
+        ("2026-11-01T12:00:00+00:00", True),
+        ("2026-11-02T04:59:59.999999+00:00", True),
+        ("2026-11-02T05:00:00+00:00", False),
+    ],
+)
+def test_production_window_admits_same_day_until_midnight(
+    monkeypatch, tmp_path, timestamp, allowed
+):
+    workflow = yaml.safe_load(Path(".github/workflows/monitor.yml").read_text(encoding="utf-8"))
+    env = next(
+        step["env"]
+        for step in workflow["jobs"]["monitor"]["steps"]
+        if step.get("name") == "Run scheduled monitor"
+    )
+    assert env["MONITOR_TIMEZONE"] == "America/New_York"
+    assert env["MONITOR_HOUR"] == "7"
+    assert env["SCHEDULE_GRACE_HOURS"] == "17"
+    now = datetime.fromisoformat(timestamp)
+    local = now.astimezone(ET)
+    expected_key = f"daily-{local.date()}"
+    key = scheduled_run_key(
+        now,
+        timezone=env["MONITOR_TIMEZONE"],
+        hour=int(env["MONITOR_HOUR"]),
+        grace_hours=int(env["SCHEDULE_GRACE_HOURS"]),
+    )
+    assert key == (expected_key if allowed else None)
+    frozen_cli(monkeypatch, now, grace_hours=int(env["SCHEDULE_GRACE_HOURS"]))
+    calls = []
+
+    async def fake_pipeline(*args, **kwargs):
+        assert allowed, "Outside-window invocation must not enter the pipeline"
+        assert kwargs["run_key"] == expected_key and kwargs["scheduled"]
+        calls.append(kwargs["run_key"])
+        report = kwargs["report"]
+        report.sources_attempted = report.sources_succeeded = 1
+        report.scan_outcome = "scan_completed"
+        return report
+
+    monkeypatch.setattr(cli, "run_pipeline", fake_pipeline)
+    path = tmp_path / "status.json"
+    result = CliRunner().invoke(cli.app, ["run", "--scheduled", "--status-file", str(path)])
+    assert result.exit_code == 0, result.output
+    status = json.loads(path.read_text())
+    assert status["scan_outcome"] == ("scan_completed" if allowed else "skipped_outside_window")
+    midnight = (local + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    assert status["schedule"]["cutoff_exclusive"] == midnight.isoformat()
+    assert calls == ([expected_key] if allowed else [])
