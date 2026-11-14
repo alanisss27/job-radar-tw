@@ -8,7 +8,7 @@ from job_monitor.active_status import ActiveStatus
 from job_monitor.config import load_companies
 from job_monitor.matching import parse_job
 from job_monitor.models import AtsType, RemoteType
-from job_monitor.sources import SOURCE_CLASSES, SourceError, TalentBrewSource
+from job_monitor.sources import SOURCE_CLASSES, TalentBrewSource
 
 
 COMPANY = next(
@@ -17,18 +17,6 @@ COMPANY = next(
     if item.slug == "alexion-astrazeneca-rare-disease"
 )
 ENDPOINT = "https://careers.astrazeneca.com/search-jobs/results"
-
-
-@pytest.mark.asyncio
-@respx.mock
-@pytest.mark.parametrize("has_jobs", [True, False, None])
-async def test_alexion_live_contentless_envelope_is_incomplete_not_empty(has_jobs):
-    respx.get(ENDPOINT).respond(
-        200, json={"filters": "", "results": "", "hasJobs": has_jobs, "hasContent": False}
-    )
-    async with httpx.AsyncClient() as client:
-        with pytest.raises(SourceError, match="verified complete inventory"):
-            await TalentBrewSource(COMPANY, client).fetch()
 
 
 def listing(req: str, url_id: str, title: str, location: str, company: str = "Alexion") -> str:
@@ -80,7 +68,10 @@ async def test_alexion_filter_deduplicates_requisitions_and_normalizes_details()
         ),
     )
     async with httpx.AsyncClient() as client:
-        jobs = await TalentBrewSource(COMPANY, client).fetch()
+        # Preserve coverage of the generic HTML adapter; Alexion's actual AJAX
+        # contract and its fail-closed cases are exercised separately.
+        legacy = COMPANY.model_copy(update={"slug": "legacy-talentbrew"})
+        jobs = await TalentBrewSource(legacy, client).fetch()
 
     assert route.called
     params = route.calls[0].request.url.params
