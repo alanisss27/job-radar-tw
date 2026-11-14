@@ -2485,44 +2485,192 @@ class TalentBrewSource(JobSource):
             "active_status": status,
         }
 
+    async def _alexion_inventory(self) -> dict[str, dict[str, Any]]:
+        """Use the published AJAX contract; return nothing until coverage is proved."""
+        config = self.company.ats_config
+        field, brand = config["company_filter"]["parameter"], config["company_filter"]["value"]
+
+        def incomplete(reason: str) -> None:
+            raise SourceError(f"Alexion TalentBrew incomplete inventory: {reason}")
+
+        def number(node, key: str) -> int:
+            value = node.get(key) if node is not None else None
+            if not isinstance(value, str) or not re.fullmatch(r"[0-9]+", value):
+                incomplete(f"missing or invalid {key}")
+            return int(value)
+
+        landing = str(self.company.careers_url)
+        soup = BeautifulSoup(await self._get(landing), "html.parser")
+        module, filters = soup.select_one("#search-results"), soup.select_one("#search-filters")
+        if module is None or filters is None:
+            incomplete("missing search modules")
+        facet = filters.find("input", attrs={"data-field-name": field, "data-id": brand})
+        if facet is None or filters.select("input[checked]"):
+            incomplete("missing brand facet or unexpected preselected filters")
+        total = number(facet, "data-count")
+        size = int(config.get("page_size", 15))
+        if size <= 0 or number(module, "data-records-per-page") != size:
+            incomplete("unexpected page size")
+        pages = max(1, (total + size - 1) // size)
+        if pages > 100:
+            incomplete("inventory exceeds the bounded page budget")
+        org = str(config.get("search_params", {}).get("orgIds", ""))
+        if not org or module.get("data-organization-ids") != org:
+            incomplete("organization scope is unverified")
+        if any(
+            module.get(f"data-{key}") for key in ("keywords", "location", "latitude", "longitude")
+        ):
+            incomplete("unexpected geographic or keyword scope")
+        endpoint = urljoin(landing, str(module.get("data-ajax-post-url", "")))
+        if (
+            urlsplit(endpoint).netloc != urlsplit(landing).netloc
+            or urlsplit(endpoint).scheme != "https"
+            or urlsplit(endpoint).path != "/search-jobs/resultspost"
+            or module.get("data-search-results-module-name") != "Search Results"
+            or filters.get("data-search-filters-module-name") != "Search Filters"
+        ):
+            incomplete("unexpected AJAX search contract")
+        criteria = {
+            "ActiveFacetID": 0,
+            "CurrentPage": 1,
+            "RecordsPerPage": size,
+            "Distance": number(module, "data-distance"),
+            "RadiusUnitType": number(filters, "data-radius-unit-type"),
+            "Keywords": "",
+            "Location": "",
+            "ShowRadius": False,
+            "FacetTerm": "",
+            "FacetType": 0,
+            "IsPagination": False,
+            "SearchResultsModuleName": "Search Results",
+            "SearchFiltersModuleName": "Search Filters",
+            "SortCriteria": number(module, "data-sort-criteria"),
+            "SortDirection": number(module, "data-sort-direction"),
+            "SearchType": number(module, "data-search-type"),
+            "ResultsType": number(module, "data-results-type"),
+            "OrganizationIds": org,
+            "FacetFilters": [
+                {
+                    "ID": brand,
+                    "FacetType": number(facet, "data-facet-type"),
+                    "Count": total,
+                    "Display": facet.get("data-display"),
+                    "IsApplied": True,
+                    "FieldName": field,
+                }
+            ],
+        }
+        found: dict[str, dict[str, Any]] = {}
+        seen_postings: set[str] = set()
+        for page in range(1, pages + 1):
+            criteria["CurrentPage"] = page
+            response = await self.client.post(
+                endpoint, json=criteria, timeout=20, follow_redirects=True
+            )
+            response.raise_for_status()
+            try:
+                envelope = response.json()
+            except ValueError:
+                incomplete("AJAX response is not JSON")
+            if not isinstance(envelope, dict) or any(
+                not isinstance(envelope.get(key), str) for key in ("results", "filters")
+            ):
+                incomplete("malformed results envelope")
+            # hasContent describes non-job content, not inventory completeness.
+            result = BeautifulSoup(envelope["results"], "html.parser")
+            current = result.select_one("#search-results")
+            selected = BeautifulSoup(envelope["filters"], "html.parser").select("input[checked]")
+            if (
+                len(selected) != 1
+                or selected[0].get("data-field-name") != field
+                or selected[0].get("data-id") != brand
+                or number(selected[0], "data-count") != total
+            ):
+                incomplete(f"page {page} does not confirm exclusive brand scope")
+            if (
+                number(current, "data-current-page") != page
+                or number(current, "data-total-results") != total
+                or number(current, "data-total-job-results") != total
+                or number(current, "data-records-per-page") != size
+                or number(current, "data-total-pages") not in ({0, 1} if total == 0 else {pages})
+                or current.get("data-organization-ids") != org
+                or any(
+                    current.get(f"data-{key}")
+                    for key in ("keywords", "location", "latitude", "longitude")
+                )
+                or envelope.get("hasJobs") is not (total > 0)
+            ):
+                incomplete(f"page {page} has inconsistent pagination or totals")
+            listing = result.select_one("#search-results-list > ul")
+            if listing is None:
+                incomplete(f"page {page} has no inventory list")
+            cards = listing.find_all("li", recursive=False)
+            if len(cards) != min(size, total - (page - 1) * size):
+                incomplete(f"page {page} is short or exceeds the reported total")
+            for card in cards:
+                anchors = card.select("a[data-job-id]")
+                ids = {a.get("data-job-id") for a in anchors}
+                logos = card.select(".brand-logo-wrapper")
+                heading = card.select_one("h2")
+                if (
+                    len(ids) != 1
+                    or not anchors
+                    or not logos
+                    or any("alexion-brand" not in logo.get("class", []) for logo in logos)
+                    or heading is None
+                    or not heading.get_text(" ", strip=True)
+                ):
+                    incomplete(f"page {page} has an unidentified or foreign-brand posting")
+                posting_id = next(iter(ids))
+                if not posting_id or not posting_id.isdigit() or posting_id in seen_postings:
+                    incomplete(f"page {page} repeats or lacks a stable posting ID")
+                url = urljoin(endpoint, str(anchors[0].get("href", "")))
+                if (
+                    urlsplit(url).netloc != urlsplit(endpoint).netloc
+                    or urlsplit(url).scheme != "https"
+                    or not self._job_path.fullmatch(urlsplit(url).path)
+                    or urlsplit(url).path.rstrip("/").rsplit("/", 1)[-1] != posting_id
+                ):
+                    incomplete(f"page {page} has an invalid posting URL")
+                rows = self._parse_listings(str(card), endpoint, str(self.company.name), str(brand))
+                if len(rows) != 1 or rows[0]["id"] in found:
+                    incomplete(f"page {page} cannot retain every posting identity")
+                rows[0]["title"] = heading.get_text(" ", strip=True)
+                found[rows[0]["id"]] = rows[0]
+                seen_postings.add(posting_id)
+        if len(seen_postings) != total or len(found) != total:
+            incomplete("unique posting count does not equal the scoped total")
+        return found
+
     async def fetch(self) -> list[RawJob]:
         config = self.company.ats_config
         endpoint = str(config["listing_endpoint"])
         filter_config = config["company_filter"]
-        params = {filter_config["parameter"]: filter_config["value"]}
-        params.update(config.get("search_params", {}))
-        page_parameter = config.get("page_parameter", "page")
-        page_size = int(config.get("page_size", 15))
         found: dict[str, dict[str, Any]] = {}
-        for page_number in range(1, 101):
-            page_params = dict(params)
-            if page_number > 1:
-                page_params[page_parameter] = page_number
-            html = await self._get(self._query_url(endpoint, page_params))
-            if self.company.slug == "alexion-astrazeneca-rare-disease":
-                try:
-                    envelope = json.loads(html)
-                except ValueError:
-                    envelope = None
-                if isinstance(envelope, dict):
-                    # The live results endpoint can claim jobs while omitting its
-                    # HTML. Never report that incomplete response as an empty board.
-                    raise SourceError(
-                        "Alexion TalentBrew returned a results envelope without "
-                        "a verified complete inventory"
-                    )
-            rows = self._parse_listings(
-                html,
-                endpoint,
-                str(config.get("brand_label", self.company.name)),
-                str(filter_config["value"]),
-            )
-            if not rows:
-                break
-            for row in rows:
-                found.setdefault(row["id"], row)
-            if len(rows) < page_size:
-                break
+        if self.company.slug == "alexion-astrazeneca-rare-disease":
+            found = await self._alexion_inventory()
+        else:
+            params = {filter_config["parameter"]: filter_config["value"]}
+            params.update(config.get("search_params", {}))
+            page_parameter = config.get("page_parameter", "page")
+            page_size = int(config.get("page_size", 15))
+            for page_number in range(1, 101):
+                page_params = dict(params)
+                if page_number > 1:
+                    page_params[page_parameter] = page_number
+                html = await self._get(self._query_url(endpoint, page_params))
+                rows = self._parse_listings(
+                    html,
+                    endpoint,
+                    str(config.get("brand_label", self.company.name)),
+                    str(filter_config["value"]),
+                )
+                if not rows:
+                    break
+                for row in rows:
+                    found.setdefault(row["id"], row)
+                if len(rows) < page_size:
+                    break
 
         jobs_by_requisition: dict[str, RawJob] = {}
         seen_detail_urls: set[str] = set()
