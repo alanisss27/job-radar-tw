@@ -233,7 +233,7 @@ def render_run_summary(
 
     if errors:
         lines.append("")
-        lines.append("⚠️ 來源錯誤：")
+        lines.append(f"⚠️ 來源錯誤：共 {len(errors)} 筆，目前列出 {min(len(errors), 8)} 筆")
         for item in errors[:8]:
             company = html.escape(item.get("company", "unknown"))
             error = html.escape(item.get("error", "")[:160])

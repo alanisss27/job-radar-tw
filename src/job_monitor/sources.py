@@ -5,6 +5,7 @@ import email.utils
 import hashlib
 import json
 import logging
+import math
 import random
 import re
 import time
@@ -174,6 +175,14 @@ class WorkdayRequestError(SourceError):
         super().__init__(f"Workday {method} {url} failed after retries with {detail}")
 
 
+class WorkdayRetryAfterBudgetError(WorkdayRequestError):
+    """The server requires a longer wait than this source can spend."""
+
+    def __init__(self, method: str, url: str, status_code: int, delay: float):
+        super().__init__(method, url, status_code)
+        self.args = (f"{self.args[0]}; Retry-After {delay:g}s exceeds wait budget",)
+
+
 class WorkdayLocationValidationError(SourceError):
     """A single Workday detail lacked validated scope evidence."""
 
@@ -199,12 +208,13 @@ class WorkdayRequestController:
         if not value:
             return None
         try:
-            return min(cls.max_retry_after_seconds, max(0.0, float(value)))
+            seconds = float(value)
+            return max(0.0, seconds) if math.isfinite(seconds) else None
         except ValueError:
             try:
                 target = email.utils.parsedate_to_datetime(value)
                 delay = target.timestamp() - time.time()
-                return min(cls.max_retry_after_seconds, max(0.0, delay))
+                return max(0.0, delay)
             except (TypeError, ValueError, OverflowError):
                 return None
 
@@ -239,11 +249,47 @@ class WorkdayRequestController:
                 response.raise_for_status()
                 return response
             delay = self._retry_after(response)
-            if attempt + 1 >= self.max_attempts:
-                await response.aclose()
-                raise WorkdayRequestError(method, url, response.status_code)
+            over_budget = delay is not None and delay > self.max_retry_after_seconds
+            exhausted = attempt + 1 >= self.max_attempts
+            wait = (
+                0.0
+                if over_budget or exhausted
+                else (delay if delay is not None else self._backoff(attempt))
+            )
+            # Only allow bounded opaque identifiers, never arbitrary headers or bodies.
+            request_id = "unavailable"
+            for header in ("x-request-id", "x-workday-request-id", "x-correlation-id", "cf-ray"):
+                value = response.headers.get(header, "")
+                if re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", value):
+                    request_id = f"{header}:{value}"
+                    break
             await response.aclose()
-            await asyncio.sleep(delay if delay is not None else self._backoff(attempt))
+            started = time.monotonic()
+            if wait:
+                await asyncio.sleep(wait)
+            logger.warning(
+                "Workday request status=%d host=%s method=%s attempt=%d/%d "
+                "retry_after_seconds=%s requested_wait_seconds=%.3f waited_seconds=%.3f "
+                "request_id=%s action=%s",
+                response.status_code,
+                httpx.URL(url).host,
+                method,
+                attempt + 1,
+                self.max_attempts,
+                delay if delay is not None else "missing_or_invalid",
+                wait,
+                time.monotonic() - started if wait else 0.0,
+                request_id,
+                "stop_retry_after_budget"
+                if over_budget
+                else "stop_attempts"
+                if exhausted
+                else "retry",
+            )
+            if over_budget:
+                raise WorkdayRetryAfterBudgetError(method, url, response.status_code, delay)
+            if exhausted:
+                raise WorkdayRequestError(method, url, response.status_code)
         raise AssertionError("unreachable")
 
 
@@ -795,6 +841,8 @@ class WorkdaySource(JobSource):
                                 }:
                                     location_parts.append(location)
                         except WorkdayRequestError as exc:
+                            if isinstance(exc, WorkdayRetryAfterBudgetError):
+                                raise
                             if validate_locations:
                                 self._record_exclusion(
                                     item,

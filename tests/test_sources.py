@@ -1252,8 +1252,8 @@ async def test_workday_request_retries_429_then_succeeds(monkeypatch):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("retry_after,expected", [("2", 2.0), ("999", 30.0)])
-async def test_workday_retry_after_is_honored_and_capped(monkeypatch, retry_after, expected):
+@pytest.mark.parametrize("retry_after,expected", [("2", 2.0), ("30", 30.0)])
+async def test_workday_retry_after_within_budget_is_honored(monkeypatch, retry_after, expected):
     controller = WorkdayRequestController(concurrency=1, min_interval_seconds=0)
     sleeps = []
 
