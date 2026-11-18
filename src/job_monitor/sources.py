@@ -249,11 +249,12 @@ class WorkdayRequestController:
                 response.raise_for_status()
                 return response
             delay = self._retry_after(response)
+            stop_without_retry_after = response.status_code == 429 and delay is None
             over_budget = delay is not None and delay > self.max_retry_after_seconds
             exhausted = attempt + 1 >= self.max_attempts
             wait = (
                 0.0
-                if over_budget or exhausted
+                if stop_without_retry_after or over_budget or exhausted
                 else (delay if delay is not None else self._backoff(attempt))
             )
             # Only allow bounded opaque identifiers, never arbitrary headers or bodies.
@@ -280,7 +281,9 @@ class WorkdayRequestController:
                 wait,
                 time.monotonic() - started if wait else 0.0,
                 request_id,
-                "stop_retry_after_budget"
+                "stop_429_without_retry_after"
+                if stop_without_retry_after
+                else "stop_retry_after_budget"
                 if over_budget
                 else "stop_attempts"
                 if exhausted
@@ -288,7 +291,7 @@ class WorkdayRequestController:
             )
             if over_budget:
                 raise WorkdayRetryAfterBudgetError(method, url, response.status_code, delay)
-            if exhausted:
+            if stop_without_retry_after or exhausted:
                 raise WorkdayRequestError(method, url, response.status_code)
         raise AssertionError("unreachable")
 
@@ -841,7 +844,9 @@ class WorkdaySource(JobSource):
                                 }:
                                     location_parts.append(location)
                         except WorkdayRequestError as exc:
-                            if isinstance(exc, WorkdayRetryAfterBudgetError):
+                            if exc.status_code == 429 or isinstance(
+                                exc, WorkdayRetryAfterBudgetError
+                            ):
                                 raise
                             if validate_locations:
                                 self._record_exclusion(

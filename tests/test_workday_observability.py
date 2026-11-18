@@ -57,7 +57,7 @@ def test_retry_after_http_date_is_not_capped(monkeypatch, seconds):
     assert WorkdayRequestController._retry_after(response) == max(0, seconds)
 
 
-@pytest.mark.parametrize("retry_after", [None, "invalid", "2", "31"])
+@pytest.mark.parametrize("retry_after", [None, "invalid", "nan", "2", "31"])
 async def test_429_diagnostics_are_safe_and_measure_actual_wait(monkeypatch, caplog, retry_after):
     clock = [100.0]
     sleeps = []
@@ -88,12 +88,20 @@ async def test_429_diagnostics_are_safe_and_measure_actual_wait(monkeypatch, cap
             assert not sleeps
             assert "action=stop_retry_after_budget" in caplog.text
             assert "waited_seconds=0.000" in caplog.text
+        elif retry_after != "2":
+            with pytest.raises(WorkdayRequestError, match="HTTP 429") as exc:
+                await controller.request(client, "GET", "https://example.test/private?token=secret")
+            assert exc.value.status_code == 429
+            assert len(calls) == 1
+            assert not sleeps
+            assert "action=stop_429_without_retry_after" in caplog.text
+            assert "retry_after_seconds=missing_or_invalid" in caplog.text
+            assert "requested_wait_seconds=0.000 waited_seconds=0.000" in caplog.text
         else:
             await controller.request(client, "GET", "https://example.test/private?token=secret")
             assert len(calls) == 2
-            expected = 2.0 if retry_after == "2" else 0.6
-            assert sleeps == [expected]
-            assert f"waited_seconds={expected + 0.125:.3f}" in caplog.text
+            assert sleeps == [2.0]
+            assert "waited_seconds=2.125" in caplog.text
     assert "attempt=1/3" in caplog.text
     assert "request_id=x-request-id:safe-id:123" in caplog.text
     assert "retry_after_seconds=" in caplog.text
@@ -111,7 +119,9 @@ async def test_persistent_429_logs_final_attempt_and_rejects_unsafe_id(monkeypat
 
     def handler(request):
         calls.append(request)
-        return httpx.Response(429, headers={"x-request-id": "unsafe\nforged-log"})
+        return httpx.Response(
+            429, headers={"x-request-id": "unsafe\nforged-log", "Retry-After": "0"}
+        )
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         with pytest.raises(WorkdayRequestError, match="HTTP 429"):
@@ -132,6 +142,10 @@ async def test_persistent_429_logs_final_attempt_and_rejects_unsafe_id(monkeypat
         (False, False, None),
         (True, False, "60"),
         (True, True, "60"),
+        (True, False, None),
+        (True, True, "invalid"),
+        (True, False, "0"),
+        (True, True, "0"),
     ],
 )
 @respx.mock
@@ -172,18 +186,24 @@ async def test_429_source_failure_preserves_inventory(
     with db.engine.begin() as conn:
         conn.execute(update(jobs).values(missing_count=1))
     monkeypatch.setattr(pipeline, "Storage", lambda *a, **kw: db)
+
+    def unexpected_mark_missing(*args):
+        pytest.fail("incomplete Workday inventory must skip mark_missing")
+
+    monkeypatch.setattr(db, "mark_missing", unexpected_mark_missing)
     headers = {} if retry_after is None else {"Retry-After": retry_after}
     listing = respx.post(company.ats_config["endpoint"])
     if detail:
         listing.respond(
             200,
             json={
-                "total": 1,
+                "total": 2,
                 "facets": [
                     {"facetParameter": "locations", "values": [{"id": "us", "descriptor": "US"}]}
                 ],
                 "jobPostings": [
-                    {"externalPath": "/job/new", "title": "New job", "locationsText": "US"}
+                    {"externalPath": "/job/new", "title": "New job", "locationsText": "US"},
+                    {"externalPath": "/job/later", "title": "Later job", "locationsText": "US"},
                 ],
             },
         )
@@ -204,7 +224,7 @@ async def test_429_source_failure_preserves_inventory(
         SearchPreferences(),
         run_key="429-test",
     )
-    assert failed.call_count == (1 if retry_after else 3)
+    assert failed.call_count == (3 if retry_after == "0" else 1)
     assert report.sources_succeeded == 0
     assert report.scan_outcome == "scan_failed"
     assert report.jobs_fetched == report.jobs_closed == 0

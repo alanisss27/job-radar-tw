@@ -1242,7 +1242,9 @@ async def test_workday_request_retries_429_then_succeeds(monkeypatch):
     async def handler(request):
         nonlocal attempts
         attempts += 1
-        return httpx.Response(429 if attempts == 1 else 200, request=request)
+        return httpx.Response(
+            429 if attempts == 1 else 200, headers={"Retry-After": "0.5"}, request=request
+        )
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         response = await controller.request(client, "POST", "https://example.test/jobs")
@@ -1278,7 +1280,8 @@ async def test_workday_retry_after_within_budget_is_honored(monkeypatch, retry_a
 
 
 @pytest.mark.asyncio
-async def test_workday_missing_retry_after_uses_bounded_jittered_backoff(monkeypatch):
+@pytest.mark.parametrize("transport_error", [False, True])
+async def test_workday_transient_failures_use_bounded_backoff(monkeypatch, transport_error):
     controller = WorkdayRequestController(concurrency=1, min_interval_seconds=0)
     sleeps = []
     monkeypatch.setattr("job_monitor.sources.random.uniform", lambda *_: 0.1)
@@ -1292,6 +1295,8 @@ async def test_workday_missing_retry_after_uses_bounded_jittered_backoff(monkeyp
     async def handler(request):
         nonlocal calls
         calls += 1
+        if transport_error and calls < 3:
+            raise httpx.ReadTimeout("mock timeout", request=request)
         return httpx.Response(503 if calls < 3 else 200, request=request)
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
@@ -1313,7 +1318,7 @@ async def test_workday_persistent_429_and_permanent_4xx_are_transparent(monkeypa
     async def persistent(request):
         nonlocal calls
         calls += 1
-        return httpx.Response(429, request=request)
+        return httpx.Response(429, headers={"Retry-After": "0"}, request=request)
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(persistent)) as client:
         with pytest.raises(WorkdayRequestError, match="HTTP 429"):
@@ -1347,7 +1352,7 @@ async def test_workday_listing_and_detail_both_use_shared_retry_path():
     )
     listing = respx.post(cfg.ats_config["endpoint"]).mock(
         side_effect=[
-            httpx.Response(429),
+            httpx.Response(429, headers={"Retry-After": "0"}),
             httpx.Response(
                 200,
                 json={
@@ -1364,7 +1369,7 @@ async def test_workday_listing_and_detail_both_use_shared_retry_path():
     )
     detail = respx.get(cfg.ats_config["detail_base_url"] + "/job/1").mock(
         side_effect=[
-            httpx.Response(429),
+            httpx.Response(429, headers={"Retry-After": "0"}),
             httpx.Response(
                 200,
                 json={
