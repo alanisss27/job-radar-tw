@@ -2,11 +2,6 @@ name: Temporary PostgreSQL read-only preflight
 
 on:
   workflow_dispatch:
-    inputs:
-      project_fingerprint:
-        description: "SHA-256 of the expected Supabase project reference"
-        required: true
-        type: string
 
 permissions:
   contents: read
@@ -14,6 +9,7 @@ permissions:
 jobs:
   inspect:
     if: github.ref == 'refs/heads/main' && github.ref_protected
+    environment: db-readonly-preflight
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -35,7 +31,7 @@ jobs:
       - name: Inspect PostgreSQL catalogs (read only)
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          PROJECT_FINGERPRINT: ${{ inputs.project_fingerprint }}
+          PROJECT_FINGERPRINT: ${{ secrets.SUPABASE_PROJECT_FINGERPRINT }}
         run: |
           .venv/bin/python -I -S - 2>/dev/null <<'PY'
           import hashlib
@@ -61,18 +57,18 @@ jobs:
               "update_granted": "unknown",
               "policy_review_status": "invalid_fingerprint",
           }
-          expected = os.environ.get("PROJECT_FINGERPRINT", "")
+          expected = os.environ.pop("PROJECT_FINGERPRINT", "")
+          url = os.environ.pop("DATABASE_URL", "")
           phase = "invalid_fingerprint"
           try:
               if not re.fullmatch(r"[a-f0-9]{64}", expected):
                   raise ValueError()
-              phase = "connection_failed"
+              phase = "invalid_endpoint"
               # Import the locked driver without processing site startup hooks.
               sys.path.append(str(Path(".venv/lib/python3.12/site-packages").resolve()))
               import psycopg
               from psycopg.conninfo import conninfo_to_dict
 
-              url = os.environ.pop("DATABASE_URL", "")
               url = url.replace("postgresql+psycopg://", "postgresql://", 1)
               if not url.startswith(("postgresql://", "postgres://")):
                   raise ValueError()
@@ -84,12 +80,29 @@ jobs:
               ):
                   raise ValueError()
               host = params["host"].lower()
-              if not re.fullmatch(r"[a-z0-9][a-z0-9.-]*", host):
+              port = params.get("port", "5432")
+              if port not in {"5432", "6543"}:
                   raise ValueError()
-              if params.get("port", "5432") not in {"5432", "6543"}:
+              # Direct and dedicated pooler hosts carry the project reference.
+              # Shared session and transaction poolers carry it in the login role.
+              project = re.fullmatch(r"db\.([a-z0-9]{20})\.supabase\.co", host)
+              if not project and re.fullmatch(
+                  r"aws-[0-9]+-[a-z0-9]+(?:-[a-z0-9]+)*\.pooler\.supabase\.com", host
+              ):
+                  project = re.fullmatch(r"[^.]+\.([a-z0-9]{20})", params["user"])
+              if not project:
                   raise ValueError()
-              params.update(sslmode="verify-full", sslrootcert="system", connect_timeout=5)
-              with psycopg.connect(**params, autocommit=True) as conn:
+              actual = hashlib.sha256(project[1].encode("ascii")).hexdigest()
+              result["project_match"] = hmac.compare_digest(actual, expected)
+              if not result["project_match"]:
+                  phase = "project_mismatch"
+                  raise ValueError()
+              phase = "connection_failed"
+              params.update(
+                  host=host, port=port, sslmode="verify-full", sslrootcert="system",
+                  gssencmode="disable", connect_timeout=5,
+              )
+              with psycopg.connect(**params, autocommit=True, prepare_threshold=None) as conn:
                   result["connection_ok"] = True
                   phase = "readonly_check_failed"
                   conn.execute("BEGIN READ ONLY")
@@ -100,15 +113,6 @@ jobs:
                       result["transaction_read_only"] = readonly
                       if not readonly:
                           raise RuntimeError()
-                      direct = re.fullmatch(r"db\.([a-z0-9]{20})\.supabase\.co", host)
-                      pooler = re.fullmatch(
-                          r"aws-[0-9]+-[a-z0-9-]+\.pooler\.supabase\.com", host
-                      )
-                      pooled_user = re.fullmatch(r"[^.]+\.([a-z0-9]{20})", params["user"])
-                      project = direct or (pooled_user if pooler else None)
-                      if project:
-                          actual = hashlib.sha256(project[1].encode("ascii")).hexdigest()
-                          result["project_match"] = hmac.compare_digest(actual, expected)
                       phase = "catalog_check_failed"
                       row = conn.execute("""
                           SELECT c.relkind = 'r'
