@@ -1,0 +1,181 @@
+name: Temporary PostgreSQL read-only preflight
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    if: github.ref == 'refs/heads/main' && github.ref_protected
+    environment: db-readonly-preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          sparse-checkout: |
+            /pyproject.toml
+            /uv.lock
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d
+        with:
+          enable-cache: false
+      - run: uv sync --frozen --no-dev --no-install-project --no-build
+      - name: Inspect PostgreSQL catalogs (read only)
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          PROJECT_FINGERPRINT: ${{ secrets.SUPABASE_PROJECT_FINGERPRINT }}
+        run: |
+          .venv/bin/python -I -S - 2>/dev/null <<'PY'
+          import hashlib
+          import hmac
+          import json
+          import logging
+          import os
+          import re
+          import sys
+          from pathlib import Path
+
+          logging.disable(logging.CRITICAL)
+          result = {
+              "connection_ok": False,
+              "transaction_read_only": "unknown",
+              "project_match": "unknown",
+              "table_exists": "unknown",
+              "schema_matches": "unknown",
+              "rls_enabled": "unknown",
+              "rls_active_for_effective_role": "unknown",
+              "select_granted": "unknown",
+              "insert_granted": "unknown",
+              "update_granted": "unknown",
+              "policy_review_status": "invalid_fingerprint",
+          }
+          expected = os.environ.pop("PROJECT_FINGERPRINT", "")
+          url = os.environ.pop("DATABASE_URL", "")
+          phase = "invalid_fingerprint"
+          try:
+              if not re.fullmatch(r"[a-f0-9]{64}", expected):
+                  raise ValueError()
+              phase = "invalid_endpoint"
+              # Import the locked driver without processing site startup hooks.
+              sys.path.append(str(Path(".venv/lib/python3.12/site-packages").resolve()))
+              import psycopg
+              from psycopg.conninfo import conninfo_to_dict
+
+              url = url.replace("postgresql+psycopg://", "postgresql://", 1)
+              if not url.startswith(("postgresql://", "postgres://")):
+                  raise ValueError()
+              params = conninfo_to_dict(url)
+              # Reject alternate routing, session options and TLS overrides.
+              allowed = {"host", "port", "dbname", "user", "password", "sslmode"}
+              if params.keys() - allowed or not all(
+                  params.get(key) for key in ("host", "dbname", "user", "password")
+              ):
+                  raise ValueError()
+              host = params["host"].lower()
+              port = params.get("port", "5432")
+              if port not in {"5432", "6543"}:
+                  raise ValueError()
+              # Direct and dedicated pooler hosts carry the project reference.
+              # Shared session and transaction poolers carry it in the login role.
+              project = re.fullmatch(r"db\.([a-z0-9]{20})\.supabase\.co", host)
+              if not project and re.fullmatch(
+                  r"aws-[0-9]+-[a-z0-9]+(?:-[a-z0-9]+)*\.pooler\.supabase\.com", host
+              ):
+                  project = re.fullmatch(r"[^.]+\.([a-z0-9]{20})", params["user"])
+              if not project:
+                  raise ValueError()
+              actual = hashlib.sha256(project[1].encode("ascii")).hexdigest()
+              result["project_match"] = hmac.compare_digest(actual, expected)
+              if not result["project_match"]:
+                  phase = "project_mismatch"
+                  raise ValueError()
+              phase = "connection_failed"
+              params.update(
+                  host=host, port=port, sslmode="verify-full", sslrootcert="system",
+                  gssencmode="disable", connect_timeout=5,
+              )
+              with psycopg.connect(**params, autocommit=True, prepare_threshold=None) as conn:
+                  result["connection_ok"] = True
+                  phase = "readonly_check_failed"
+                  conn.execute("BEGIN READ ONLY")
+                  try:
+                      conn.execute("SET LOCAL statement_timeout = '3s'")
+                      conn.execute("SET LOCAL lock_timeout = '1s'")
+                      readonly = conn.execute("SHOW transaction_read_only").fetchone()[0] == "on"
+                      result["transaction_read_only"] = readonly
+                      if not readonly:
+                          raise RuntimeError()
+                      phase = "catalog_check_failed"
+                      row = conn.execute("""
+                          SELECT c.relkind = 'r'
+                              AND to_regclass('workday_host_cooldowns') = c.oid
+                              AND h.atttypid = 'varchar'::regtype AND h.atttypmod = 257
+                              AND h.attnotnull AND h.attgenerated = ''
+                              AND d.atttypid = 'float8'::regtype AND d.attnotnull
+                              AND d.attgenerated = ''
+                              AND (SELECT count(*) FROM pg_attribute a
+                                   WHERE a.attrelid = c.oid AND a.attnum > 0
+                                     AND NOT a.attisdropped) = 2
+                              AND EXISTS (
+                                  SELECT 1 FROM pg_constraint p
+                                  JOIN pg_index i ON i.indexrelid = p.conindid
+                                  WHERE p.conrelid = c.oid AND p.contype = 'p'
+                                    AND p.conkey = ARRAY[h.attnum]
+                                    AND p.convalidated AND NOT p.condeferrable
+                                    AND i.indisvalid AND i.indisready
+                              ),
+                              c.relrowsecurity, row_security_active(c.oid),
+                              has_schema_privilege(n.oid, 'USAGE')
+                                AND has_column_privilege(c.oid, h.attnum, 'SELECT')
+                                AND has_column_privilege(c.oid, d.attnum, 'SELECT'),
+                              has_schema_privilege(n.oid, 'USAGE')
+                                AND has_column_privilege(c.oid, h.attnum, 'INSERT')
+                                AND has_column_privilege(c.oid, d.attnum, 'INSERT'),
+                              has_schema_privilege(n.oid, 'USAGE')
+                                AND has_column_privilege(c.oid, d.attnum, 'UPDATE'),
+                              EXISTS (SELECT 1 FROM pg_policy p WHERE p.polrelid = c.oid)
+                          FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+                          LEFT JOIN pg_attribute h ON h.attrelid = c.oid AND h.attname = 'host'
+                            AND h.attnum > 0 AND NOT h.attisdropped
+                          LEFT JOIN pg_attribute d ON d.attrelid = c.oid
+                            AND d.attname = 'cooldown_until_epoch'
+                            AND d.attnum > 0 AND NOT d.attisdropped
+                          WHERE n.nspname = 'public' AND c.relname = 'workday_host_cooldowns'
+                          """).fetchone()
+                      result["table_exists"] = row is not None
+                      keys = ("schema_matches", "rls_enabled", "rls_active_for_effective_role",
+                              "select_granted", "insert_granted", "update_granted")
+                      if row is None:
+                          result.update(dict.fromkeys(keys, "not_applicable"))
+                          result["policy_review_status"] = "not_applicable"
+                      else:
+                          result.update(zip(keys, map(bool, row[:6]), strict=True))
+                          if not row[1]:
+                              policy = "rls_disabled"
+                          elif not row[2]:
+                              policy = "rls_not_active_for_role"
+                          elif row[6]:
+                              policy = "review_required"
+                          else:
+                              policy = "default_deny"
+                          result["policy_review_status"] = policy
+                  finally:
+                      try:
+                          conn.execute("ROLLBACK")
+                      except Exception:
+                          phase = "cleanup_failed"
+                          raise
+              phase = "complete"
+          except Exception:
+              result["policy_review_status"] = phase
+          print(json.dumps(result, sort_keys=True))
+          raise SystemExit(0 if phase == "complete" else 1)
+          PY
