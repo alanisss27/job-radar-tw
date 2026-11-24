@@ -34,18 +34,55 @@ jobs:
           PROJECT_FINGERPRINT: ${{ secrets.SUPABASE_PROJECT_FINGERPRINT }}
         run: |
           .venv/bin/python -I -S - 2>/dev/null <<'PY'
+          import errno
           import hashlib
           import hmac
           import json
           import logging
           import os
           import re
+          import socket
+          import ssl
           import sys
           from pathlib import Path
 
           logging.disable(logging.CRITICAL)
+
+          def classify_connection_error(error):
+              if isinstance(error, ssl.SSLCertVerificationError):
+                  return "tls_verification_failed"
+              if isinstance(error, TimeoutError | psycopg.errors.ConnectionTimeout):
+                  return "connect_timeout"
+              if isinstance(error, socket.gaierror) or (
+                  isinstance(error, OSError)
+                  and error.errno in {errno.ENETUNREACH, errno.EHOSTUNREACH}
+              ):
+                  return "network_unreachable"
+              if isinstance(error, psycopg.Error) and error.sqlstate in {"28000", "28P01"}:
+                  return "authentication_failed"
+              if isinstance(error, psycopg.OperationalError):
+                  # Startup failures may have no SQLSTATE. Match only exact libpq
+                  # reasons after a connection-attempt prefix, and never log the text.
+                  categories = {
+                      "SSL error: certificate verify failed": "tls_verification_failed",
+                      "Network is unreachable": "network_unreachable",
+                      "No route to host": "network_unreachable",
+                      "timeout expired": "connect_timeout",
+                      "Connection timed out": "connect_timeout",
+                  }
+                  reasons = set()
+                  for line in str(error).splitlines():
+                      match = re.fullmatch(r"connection to server at .+? failed: (.+)", line)
+                      reasons.add(categories.get(match[1]) if match else None)
+                  if len(reasons) == 1 and None not in reasons:
+                      return reasons.pop()
+              return "unknown_connection_error"
+
           result = {
               "connection_ok": False,
+              "connection_error": None,
+              "endpoint_type": "unknown",
+              "libpq_version": None,
               "transaction_read_only": "unknown",
               "project_match": "unknown",
               "table_exists": "unknown",
@@ -86,10 +123,15 @@ jobs:
               # Direct and dedicated pooler hosts carry the project reference.
               # Shared session and transaction poolers carry it in the login role.
               project = re.fullmatch(r"db\.([a-z0-9]{20})\.supabase\.co", host)
-              if not project and re.fullmatch(
+              if project:
+                  endpoint_type = "direct" if port == "5432" else "dedicated_transaction_pooler"
+              elif re.fullmatch(
                   r"aws-[0-9]+-[a-z0-9]+(?:-[a-z0-9]+)*\.pooler\.supabase\.com", host
               ):
                   project = re.fullmatch(r"[^.]+\.([a-z0-9]{20})", params["user"])
+                  endpoint_type = (
+                      "shared_session_pooler" if port == "5432" else "shared_transaction_pooler"
+                  )
               if not project:
                   raise ValueError()
               actual = hashlib.sha256(project[1].encode("ascii")).hexdigest()
@@ -97,12 +139,19 @@ jobs:
               if not result["project_match"]:
                   phase = "project_mismatch"
                   raise ValueError()
+              result["endpoint_type"] = endpoint_type
+              result["libpq_version"] = psycopg.pq.version()
               phase = "connection_failed"
               params.update(
                   host=host, port=port, sslmode="verify-full", sslrootcert="system",
                   gssencmode="disable", connect_timeout=5,
               )
-              with psycopg.connect(**params, autocommit=True, prepare_threshold=None) as conn:
+              try:
+                  connection = psycopg.connect(**params, autocommit=True, prepare_threshold=None)
+              except Exception as error:
+                  result["connection_error"] = classify_connection_error(error)
+                  raise
+              with connection as conn:
                   result["connection_ok"] = True
                   phase = "readonly_check_failed"
                   conn.execute("BEGIN READ ONLY")
