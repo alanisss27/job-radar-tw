@@ -2,6 +2,15 @@ name: Temporary PostgreSQL read-only preflight
 
 on:
   workflow_dispatch:
+    inputs:
+      diagnostic_mode:
+        description: Preflight diagnostic
+        type: choice
+        required: true
+        default: catalog
+        options:
+          - catalog
+          - ca_compare
 
 permissions:
   contents: read
@@ -32,8 +41,12 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           PROJECT_FINGERPRINT: ${{ secrets.SUPABASE_PROJECT_FINGERPRINT }}
+          DIAGNOSTIC_MODE: ${{ inputs.diagnostic_mode }}
+          PROJECT_CA_PEM_B64: >-
+            ${{ inputs.diagnostic_mode == 'ca_compare' && secrets.SUPABASE_PROJECT_CA_PEM_B64 || '' }}
         run: |
           .venv/bin/python -I -S - 2>/dev/null <<'PY'
+          import base64
           import errno
           import hashlib
           import hmac
@@ -41,14 +54,62 @@ jobs:
           import logging
           import os
           import re
+          import signal
           import socket
           import ssl
+          import subprocess
           import sys
+          import tempfile
+          import time
           from pathlib import Path
 
           logging.disable(logging.CRITICAL)
 
+          def classify_connection_line(line):
+              if re.fullmatch(r"failed to resolve host '[^']+': .+", line):
+                  return "network_unreachable"
+              match = re.fullmatch(r"connection to server at .+? failed: (.+)", line)
+              reason = match[1] if match else line
+              if reason == "connection timeout expired":
+                  return "connect_timeout"
+              if not match:
+                  return None
+              if re.fullmatch(r"SSL error: certificate verify failed(?:: .+)?", reason):
+                  return "tls_verification_failed"
+              if re.fullmatch(
+                  r'server certificate for "[^"]+"(?: \(and [0-9]+ other names?\))?'
+                  r' does not match host name "[^"]+"',
+                  reason,
+              ):
+                  return "tls_verification_failed"
+              if re.fullmatch(r'FATAL:[ \t]+password authentication failed for user "[^"]+"', reason):
+                  return "authentication_failed"
+              return {
+                  "Network is unreachable": "network_unreachable",
+                  "No route to host": "network_unreachable",
+                  "timeout expired": "connect_timeout",
+                  "Connection timed out": "connect_timeout",
+              }.get(reason)
+
           def classify_connection_error(error):
+              unknown = "unknown_connection_error"
+              if isinstance(error, psycopg.OperationalError):
+                  lines = str(error).splitlines()
+                  summary = "Multiple connection attempts failed. All failures were:"
+                  if summary in lines:
+                      # The exception type and SQLSTATE can describe only the last attempt.
+                      start = lines.index(summary)
+                      attempts = lines[start + 1:]
+                      if start == 0 or len(attempts) < 2:
+                          return unknown
+                      pattern = r"- host: '[^']+', port: (?:'[0-9]+'|None), hostaddr: '[^']+': (.+)"
+                      for index, line in enumerate(attempts):
+                          match = re.fullmatch(pattern, line)
+                          if not match:
+                              return unknown
+                          attempts[index] = match[1]
+                      categories = {classify_connection_line(line) for line in lines[:start] + attempts}
+                      return categories.pop() if len(categories) == 1 and None not in categories else unknown
               if isinstance(error, ssl.SSLCertVerificationError):
                   return "tls_verification_failed"
               if isinstance(error, TimeoutError | psycopg.errors.ConnectionTimeout):
@@ -61,22 +122,90 @@ jobs:
               if isinstance(error, psycopg.Error) and error.sqlstate in {"28000", "28P01"}:
                   return "authentication_failed"
               if isinstance(error, psycopg.OperationalError):
-                  # Startup failures may have no SQLSTATE. Match only exact libpq
-                  # reasons after a connection-attempt prefix, and never log the text.
-                  categories = {
-                      "SSL error: certificate verify failed": "tls_verification_failed",
-                      "Network is unreachable": "network_unreachable",
-                      "No route to host": "network_unreachable",
-                      "timeout expired": "connect_timeout",
-                      "Connection timed out": "connect_timeout",
-                  }
-                  reasons = set()
-                  for line in str(error).splitlines():
-                      match = re.fullmatch(r"connection to server at .+? failed: (.+)", line)
-                      reasons.add(categories.get(match[1]) if match else None)
-                  if len(reasons) == 1 and None not in reasons:
-                      return reasons.pop()
-              return "unknown_connection_error"
+                  categories = {classify_connection_line(line) for line in lines}
+                  if len(categories) == 1 and None not in categories:
+                      return categories.pop()
+              return unknown
+
+          def validate_project_ca(encoded):
+              if not encoded or len(encoded) > 24_000:
+                  raise ValueError()
+              pem = base64.b64decode(encoded, validate=True)
+              if not re.fullmatch(
+                  rb"-----BEGIN CERTIFICATE-----\r?\n"
+                  rb"(?:[A-Za-z0-9+/=]+\r?\n)+-----END CERTIFICATE-----(?:\r?\n)?",
+                  pem,
+              ):
+                  raise ValueError()
+              der = base64.b64decode(b"".join(pem.splitlines()[1:-1]), validate=True)
+              command = ["openssl", "x509", "-inform", "DER"]
+              metadata = subprocess.run(
+                  [*command, "-noout", "-dates", "-ext", "basicConstraints"],
+                  input=der, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                  check=True, timeout=5,
+              ).stdout.decode("ascii")
+              before = re.search(r"^notBefore=(.+)$", metadata, re.MULTILINE)
+              after = re.search(r"^notAfter=(.+)$", metadata, re.MULTILINE)
+              now = time.time()
+              if (
+                  not before or not after
+                  or not re.search(r"^[ \t]+CA:TRUE(?:,.*)?$", metadata, re.MULTILINE)
+                  or not ssl.cert_time_to_seconds(before[1]) <= now < ssl.cert_time_to_seconds(after[1])
+              ):
+                  raise ValueError()
+              # OpenSSL can parse the first certificate of a stream. Reject trailing DER.
+              canonical = subprocess.run(
+                  [*command, "-outform", "DER"], input=der,
+                  stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=True, timeout=5,
+              ).stdout
+              if canonical != der:
+                  raise ValueError()
+              return pem
+
+          def compare_connection(params, trust_source, outcomes):
+              outcome = outcomes[trust_source]
+              try:
+                  connection = psycopg.connect(**params, autocommit=True, prepare_threshold=None)
+              except Exception as error:
+                  outcome.update(status="connection_failed", connection_error=classify_connection_error(error))
+                  return True
+              try:
+                  connection.close()
+              except Exception:
+                  outcome["status"] = "cleanup_failed"
+                  return False
+              outcome["status"] = "connected"
+              return True
+
+          def compare_ca(params, pem, outcomes):
+              # Resolve once and preserve the original host for verify-full. One
+              # numeric hostaddr prevents psycopg from retrying other DNS results.
+              try:
+                  addresses = socket.getaddrinfo(
+                      params["host"], params["port"], type=socket.SOCK_STREAM, proto=socket.IPPROTO_TCP,
+                  )
+              except OSError:
+                  return "ca_resolution_failed"
+              if not addresses:
+                  return "ca_resolution_failed"
+              with tempfile.TemporaryDirectory(dir=os.environ["RUNNER_TEMP"], prefix="preflight-ca-") as directory:
+                  with tempfile.NamedTemporaryFile(dir=directory, suffix=".pem", delete=False) as certificate:
+                      certificate.write(pem)
+                  common = dict(params, hostaddr=addresses[0][4][0], target_session_attrs="any")
+                  for mode, root in (("system", "system"), ("project", certificate.name)):
+                      if not compare_connection(dict(common, sslrootcert=root), mode, outcomes):
+                          return "cleanup_failed"
+              if all(outcome["status"] == "connected" for outcome in outcomes.values()):
+                  return "ca_comparison_complete"
+              return "ca_comparison_failed"
+
+          def stop_on_termination(_signum, _frame):
+              raise SystemExit(1)
+
+          def finish(result, phase):
+              result["policy_review_status"] = phase
+              print(json.dumps(result, sort_keys=True))
+              raise SystemExit(0 if phase in {"complete", "ca_comparison_complete"} else 1)
 
           result = {
               "connection_ok": False,
@@ -96,8 +225,18 @@ jobs:
           }
           expected = os.environ.pop("PROJECT_FINGERPRINT", "")
           url = os.environ.pop("DATABASE_URL", "")
-          phase = "invalid_fingerprint"
+          ca_encoded = os.environ.pop("PROJECT_CA_PEM_B64", "")
+          mode = os.environ.pop("DIAGNOSTIC_MODE", "catalog")
+          phase = "invalid_diagnostic_mode"
           try:
+              if mode not in {"catalog", "ca_compare"}:
+                  raise ValueError()
+              phase = "invalid_fingerprint"
+              if mode == "ca_compare":
+                  result["ca_comparison"] = {
+                      name: {"status": "not_attempted", "connection_error": None}
+                      for name in ("system", "project")
+                  }
               if not re.fullmatch(r"[a-f0-9]{64}", expected):
                   raise ValueError()
               phase = "invalid_endpoint"
@@ -141,11 +280,18 @@ jobs:
                   raise ValueError()
               result["endpoint_type"] = endpoint_type
               result["libpq_version"] = psycopg.pq.version()
-              phase = "connection_failed"
               params.update(
                   host=host, port=port, sslmode="verify-full", sslrootcert="system",
                   gssencmode="disable", connect_timeout=5,
               )
+              if mode == "ca_compare":
+                  phase = "invalid_project_ca"
+                  pem = validate_project_ca(ca_encoded)
+                  phase = "ca_setup_or_cleanup_failed"
+                  signal.signal(signal.SIGTERM, stop_on_termination)
+                  phase = compare_ca(params, pem, result["ca_comparison"])
+                  finish(result, phase)
+              phase = "connection_failed"
               try:
                   connection = psycopg.connect(**params, autocommit=True, prepare_threshold=None)
               except Exception as error:
@@ -224,7 +370,6 @@ jobs:
                           raise
               phase = "complete"
           except Exception:
-              result["policy_review_status"] = phase
-          print(json.dumps(result, sort_keys=True))
-          raise SystemExit(0 if phase == "complete" else 1)
+              pass
+          finish(result, phase)
           PY
